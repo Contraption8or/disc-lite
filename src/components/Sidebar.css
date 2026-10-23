@@ -17,10 +17,10 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-2) 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  user-select: none;
 }
 
 .sidebar__heading {
@@ -28,7 +28,7 @@
   align-items: center;
   justify-content: space-between;
   margin: var(--space-4) 0 var(--space-1);
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-3) 0 var(--space-3);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -53,63 +53,126 @@
   color: var(--text-primary);
 }
 
+/* A tree row, VS Code explorer style: compact, full width, the whole row is
+   the click target. Left padding (set inline) carries the indent. */
 .sidebar__row {
   position: relative;
   display: flex;
   align-items: center;
-}
-
-.sidebar__item {
-  flex: none;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
+  height: 24px;
+  padding-right: var(--space-2);
   color: var(--text-secondary);
-  padding: 5px var(--space-2);
-  text-align: left;
-  font-size: 13px;
   cursor: pointer;
+  outline: none;
 }
 
-/* Inside a folder row (a horizontal flex), the name button fills the row;
-   as a top-level item in the column it keeps its natural height. */
-.sidebar__row > .sidebar__item {
-  flex: 1;
-}
-
-.sidebar__item:hover {
+.sidebar__row:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
 
-.sidebar__item--active {
+.sidebar__row--active,
+.sidebar__row--active:hover {
   background: var(--bg-active);
   color: var(--text-primary);
 }
 
-.sidebar__item--missing {
+.sidebar__row:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--text-tertiary);
+}
+
+.sidebar__row--missing {
   opacity: 0.45;
 }
 
-.sidebar__item-name {
+.sidebar__chevron {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  border-radius: 3px;
+}
+
+.sidebar__chevron:hover {
+  color: var(--text-primary);
+}
+
+.sidebar__chevron svg {
+  transition: transform 0.12s ease;
+}
+
+.sidebar__chevron--open svg {
+  transform: rotate(90deg);
+}
+
+.sidebar__name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-left: 2px;
+}
+
+/* A faint vertical guide under each expanded folder's chevron, like VS
+   Code's indent guides. The x position comes from --guide-x. */
+.sidebar__children {
+  position: relative;
+}
+
+.sidebar__children::before {
+  content: "";
+  position: absolute;
+  left: var(--guide-x);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-color);
+  pointer-events: none;
+}
+
+/* Drag-to-reorder: a white line shows where the folder will land. */
+.sidebar__block {
+  position: relative;
+}
+
+.sidebar__block--dragging {
+  opacity: 0.4;
+}
+
+.sidebar__block--drop-before::before,
+.sidebar__block--drop-after::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.sidebar__block--drop-before::before {
+  top: -1px;
+}
+
+.sidebar__block--drop-after::after {
+  bottom: -1px;
 }
 
 /* Only appears on hover so the list stays plain text. */
 .sidebar__remove {
-  position: absolute;
-  right: 4px;
-  width: 20px;
-  height: 20px;
+  flex: none;
+  width: 18px;
+  height: 18px;
   display: none;
   align-items: center;
   justify-content: center;
-  background: var(--bg-active);
+  background: transparent;
   border: none;
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
@@ -123,22 +186,25 @@
 }
 
 .sidebar__remove:hover {
+  background: var(--bg-active);
   color: var(--danger);
 }
 
 .sidebar__rename {
   flex: 1;
   min-width: 0;
+  height: 22px;
   background: var(--bg-panel-alt);
   border: 1px solid var(--text-secondary);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
-  padding: 4px var(--space-2);
+  padding: 0 var(--space-2);
   font-size: 13px;
   outline: none;
 }
 
 .sidebar__empty {
+  margin: 0 var(--space-3);
   background: transparent;
   border: 1px dashed var(--border-color);
   border-radius: var(--radius-sm);

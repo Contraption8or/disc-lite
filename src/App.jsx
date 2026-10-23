@@ -6,6 +6,7 @@ import LibraryPanel from "./components/LibraryPanel.jsx";
 import NowPlayingBar from "./components/NowPlayingBar.jsx";
 import { DiscContext } from "./context/DiscContext.jsx";
 import { toMediaUrl } from "./utils/paths.js";
+import { parseSelection } from "./utils/folderTree.js";
 import "./App.css";
 
 const FOLDERS_KEY = "lite.folders";
@@ -157,7 +158,22 @@ export default function App() {
 
   const handleRemoveFolder = useCallback((id) => {
     setFolders((prev) => prev.filter((f) => f.id !== id));
-    setActiveFolderId((cur) => (cur === id ? "all" : cur));
+    setActiveFolderId((cur) => (parseSelection(cur).folderId === id ? "all" : cur));
+  }, []);
+
+  // Drag-to-reorder from the sidebar: put `dragId` just before/after `targetId`.
+  const handleMoveFolder = useCallback((dragId, targetId, pos) => {
+    setFolders((prev) => {
+      if (dragId === targetId) return prev;
+      const item = prev.find((f) => f.id === dragId);
+      if (!item) return prev;
+      const rest = prev.filter((f) => f.id !== dragId);
+      let to = rest.findIndex((f) => f.id === targetId);
+      if (to === -1) return prev;
+      if (pos === "after") to += 1;
+      rest.splice(to, 0, item);
+      return rest;
+    });
   }, []);
 
   const handleRenameFolder = useCallback((id, name) => {
@@ -173,10 +189,15 @@ export default function App() {
   }, []);
 
   const handleDropFiles = useCallback(
-    async (sourcePaths, folderId) => {
+    async (sourcePaths, folderId, subPath = "") => {
       const folder = foldersRef.current.find((f) => f.id === folderId);
       if (!folder || !window.disc || sourcePaths.length === 0) return;
-      await window.disc.copyFilesIntoFolder(folder.folderPath, sourcePaths);
+      // A subfolder is just a path under the folder's root (forward slashes
+      // are fine on Windows too).
+      const dest = subPath
+        ? `${folder.folderPath.replace(/[\/]+$/, "")}/${subPath}`
+        : folder.folderPath;
+      await window.disc.copyFilesIntoFolder(dest, sourcePaths);
       scanOne(folder);
     },
     [scanOne]
@@ -488,6 +509,7 @@ export default function App() {
       onAddFolders: handleAddFolders,
       onRemoveFolder: handleRemoveFolder,
       onRenameFolder: handleRenameFolder,
+      onMoveFolder: handleMoveFolder,
       onDropFiles: handleDropFiles,
       onDeleteTrack: handleDeleteTrack,
       onRenameTrackFile: handleRenameTrackFile,
@@ -518,6 +540,7 @@ export default function App() {
       handleAddFolders,
       handleRemoveFolder,
       handleRenameFolder,
+      handleMoveFolder,
       handleDropFiles,
       handleDeleteTrack,
       handleRenameTrackFile,

@@ -3,6 +3,7 @@ import LibraryToolbar from "./LibraryToolbar.jsx";
 import TrackRow from "./TrackRow.jsx";
 import { useDisc } from "../context/DiscContext.jsx";
 import { useVirtualRows } from "../hooks/useVirtualRows.js";
+import { parseSelection, isInSubfolder } from "../utils/folderTree.js";
 import Icon from "./Icon.jsx";
 import "./LibraryPanel.css";
 
@@ -29,7 +30,10 @@ export default function LibraryPanel() {
   const dragCounter = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  const activeFolder = folders.find((f) => f.id === activeFolderId) || null;
+  // The selection is a whole folder ("<id>") or one subfolder of it
+  // ("<id>::sub/dir") — see utils/folderTree.js.
+  const { folderId: selectedFolderId, sub: selectedSub } = parseSelection(activeFolderId);
+  const activeFolder = folders.find((f) => f.id === selectedFolderId) || null;
   const trimmedQuery = query.trim();
   const isSearching = trimmedQuery.length > 0;
 
@@ -44,10 +48,21 @@ export default function LibraryPanel() {
       return allTracks.filter((t) => favs.has(t.id));
     }
     if (activeFolder) {
-      return (folderTracks[activeFolder.id] || []).map((t) => ({ ...t, folderId: activeFolder.id }));
+      return (folderTracks[activeFolder.id] || [])
+        .filter((t) => isInSubfolder(t, selectedSub))
+        .map((t) => ({ ...t, folderId: activeFolder.id }));
     }
     return allTracks;
-  }, [isSearching, trimmedQuery, allTracks, activeFolderId, activeFolder, folderTracks, favoriteIds]);
+  }, [
+    isSearching,
+    trimmedQuery,
+    allTracks,
+    activeFolderId,
+    activeFolder,
+    selectedSub,
+    folderTracks,
+    favoriteIds,
+  ]);
 
   const resultSummary = isSearching
     ? `${filteredTracks.length} result${filteredTracks.length === 1 ? "" : "s"} for "${trimmedQuery}"`
@@ -95,13 +110,13 @@ export default function LibraryPanel() {
       .filter((f) => /\.(mp3|wav|ogg|mov)$/i.test(f.name))
       .map((f) => window.disc.getPathForFile(f))
       .filter(Boolean);
-    if (paths.length > 0) onDropFiles(paths, activeFolder.id);
+    if (paths.length > 0) onDropFiles(paths, activeFolder.id, selectedSub);
   }
 
   async function handleImportFiles() {
     if (!window.disc || !activeFolder) return;
     const paths = await window.disc.chooseMp3Files();
-    if (paths.length > 0) onDropFiles(paths, activeFolder.id);
+    if (paths.length > 0) onDropFiles(paths, activeFolder.id, selectedSub);
   }
 
   const ids = () => filteredTracks.map((t) => t.id);
@@ -201,7 +216,9 @@ export default function LibraryPanel() {
       {isDraggingOver && (
         <div className="library-panel__drop-overlay">
           <div className="library-panel__drop-message">
-            {activeFolder ? `Drop to add to ${activeFolder.name}` : "Pick a folder first"}
+            {activeFolder
+              ? `Drop to add to ${selectedSub ? selectedSub : activeFolder.name}`
+              : "Pick a folder first"}
           </div>
         </div>
       )}
