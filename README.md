@@ -1,6 +1,6 @@
 # Disc Lite
 
-A stripped-down, black-and-white version of [Disc](../disc): just your music
+A stripped-down, black-and-white version of [Disc](https://github.com/Contraption8or/Disc): just your music
 folders, waveform rows, and drag-to-Premiere. No themes, panels, tags,
 collections, timers, or settings screens.
 
