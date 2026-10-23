@@ -1,7 +1,7 @@
 {
   "name": "disc-lite",
   "productName": "Disc Lite",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A stripped-down, black-and-white Disc: just your music folders, waveforms, and drag-to-Premiere.",
   "private": true,
   "main": "electron/main.js",

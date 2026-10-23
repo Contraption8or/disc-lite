@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDisc } from "../context/DiscContext.jsx";
-import { buildTree, selectionKey } from "../utils/folderTree.js";
+import { buildTree, selectionKey, parseSelection } from "../utils/folderTree.js";
 import ConfirmModal from "./ConfirmModal.jsx";
 import Icon from "./Icon.jsx";
 import "./Sidebar.css";
@@ -20,16 +20,21 @@ function loadExpanded() {
 
 // One tree row: [chevron] name. The chevron slot is always reserved (just
 // hidden when there's nothing to expand) so every name lines up.
-function Row({ depth, hasChildren, open, onToggle, active, onSelect, name, title, className = "", children, ...rest }) {
+function Row({ depth, hasChildren, open, onToggle, active, selected, onSelect, name, title, className = "", children, ...rest }) {
   return (
     <div
-      className={"sidebar__row" + (active ? " sidebar__row--active" : "") + (className ? " " + className : "")}
+      className={
+        "sidebar__row" +
+        (active ? " sidebar__row--active" : "") +
+        (selected ? " sidebar__row--selected" : "") +
+        (className ? " " + className : "")
+      }
       style={{ paddingLeft: BASE_PAD_PX + depth * INDENT_PX }}
       role="button"
       tabIndex={0}
-      onClick={onSelect}
+      onClick={(e) => onSelect(e)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") onSelect();
+        if (e.key === "Enter") onSelect({});
       }}
       title={title}
       {...rest}
@@ -62,13 +67,18 @@ export default function Sidebar() {
     setActiveFolderId,
     missingFolderIds,
     onAddFolders,
-    onRemoveFolder,
+    onRemoveFolders,
     onRenameFolder,
     onMoveFolder,
   } = useDisc();
   const [expanded, setExpanded] = useState(loadExpanded);
   const [editingId, setEditingId] = useState(null);
-  const [removeTarget, setRemoveTarget] = useState(null); // folder | null
+  // Multi-select of top-level folders: shift-click a range, ctrl-click to
+  // toggle. Separate from activeFolderId, which only decides what the track
+  // list shows.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const anchorIdRef = useRef(null);
+  const [removeTargets, setRemoveTargets] = useState(null); // folder[] | null
   const [dragId, setDragId] = useState(null);
   const [dropHint, setDropHint] = useState(null); // { id, pos: "before" | "after" } | null
   const inputRef = useRef(null);
@@ -84,6 +94,15 @@ export default function Sidebar() {
     }
   }, [editingId]);
 
+  // Forget selected folders that no longer exist (removed elsewhere).
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const live = new Set(folders.map((f) => f.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [folders]);
+
   const trees = useMemo(() => {
     const out = {};
     for (const f of folders) out[f.id] = buildTree(folderTracks[f.id] || []);
@@ -97,6 +116,64 @@ export default function Sidebar() {
       else next.add(key);
       return next;
     });
+  }
+
+  function handleFolderClick(e, folder) {
+    const ids = folders.map((f) => f.id);
+    // A modifier-click with nothing selected yet starts from the folder
+    // you're currently viewing, like an explorer would.
+    const viewing = parseSelection(activeFolderId).folderId;
+    const anchor =
+      anchorIdRef.current && ids.includes(anchorIdRef.current)
+        ? anchorIdRef.current
+        : ids.includes(viewing)
+        ? viewing
+        : null;
+    if (e.shiftKey && anchor) {
+      const a = ids.indexOf(anchor);
+      const b = ids.indexOf(folder.id);
+      const [lo, hi] = a < b ? [a, b] : [b, a];
+      setSelectedIds(new Set(ids.slice(lo, hi + 1)));
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev.size === 0 && anchor ? [anchor] : prev);
+        if (next.has(folder.id)) next.delete(folder.id);
+        else next.add(folder.id);
+        return next;
+      });
+      anchorIdRef.current = folder.id;
+      return;
+    }
+    anchorIdRef.current = folder.id;
+    setSelectedIds(new Set());
+    setActiveFolderId(folder.id);
+  }
+
+  // What × / the Remove button / Delete act on: the whole selection if
+  // there is one and it includes the folder in question, else just that one.
+  function requestRemove(folder) {
+    if (folder && selectedIds.size > 1 && selectedIds.has(folder.id)) {
+      setRemoveTargets(folders.filter((f) => selectedIds.has(f.id)));
+    } else if (folder) {
+      setRemoveTargets([folder]);
+    } else if (selectedIds.size > 0) {
+      setRemoveTargets(folders.filter((f) => selectedIds.has(f.id)));
+    }
+  }
+
+  function handleKeyDown(e) {
+    if (editingId) return;
+    if (e.key === "Delete" && selectedIds.size > 0) {
+      e.preventDefault();
+      requestRemove(null);
+    } else if (e.key === "Escape" && selectedIds.size > 0) {
+      setSelectedIds(new Set());
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      setSelectedIds(new Set(folders.map((f) => f.id)));
+    }
   }
 
   function commitRename(id, value) {
@@ -157,7 +234,7 @@ export default function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar__scroll">
+      <div className="sidebar__scroll" onKeyDown={handleKeyDown}>
         <Row
           depth={0}
           hasChildren={false}
@@ -223,13 +300,14 @@ export default function Sidebar() {
                   open={open}
                   onToggle={() => toggle(folder.id)}
                   active={activeFolderId === folder.id}
-                  onSelect={() => setActiveFolderId(folder.id)}
+                  selected={selectedIds.has(folder.id)}
+                  onSelect={(e) => handleFolderClick(e, folder)}
                   name={folder.name}
                   className={missing ? "sidebar__row--missing" : ""}
                   title={
                     missing
                       ? `Can't reach ${folder.folderPath} right now`
-                      : `${folder.folderPath} — double-click to rename, drag to reorder`
+                      : `${folder.folderPath} — double-click to rename, drag to reorder, shift/ctrl-click to select several`
                   }
                   draggable
                   onDoubleClick={() => setEditingId(folder.id)}
@@ -245,10 +323,14 @@ export default function Sidebar() {
                 >
                   <button
                     className="sidebar__remove"
-                    title="Remove from Disc (your files aren't touched)"
+                    title={
+                      selectedIds.size > 1 && selectedIds.has(folder.id)
+                        ? `Remove all ${selectedIds.size} selected folders from Disc (your files aren't touched)`
+                        : "Remove from Disc (your files aren't touched)"
+                    }
                     onClick={(e) => {
                       e.stopPropagation();
-                      setRemoveTarget(folder);
+                      requestRemove(folder);
                     }}
                   >
                     ×
@@ -265,16 +347,39 @@ export default function Sidebar() {
         })}
       </div>
 
-      {removeTarget && (
+      {selectedIds.size > 1 && (
+        <div className="sidebar__selection">
+          <span>{selectedIds.size} folders selected</span>
+          <div className="sidebar__selection-actions">
+            <button className="sidebar__selection-btn" onClick={() => setSelectedIds(new Set())}>
+              Clear
+            </button>
+            <button
+              className="sidebar__selection-btn sidebar__selection-btn--danger"
+              onClick={() => requestRemove(null)}
+              title="Remove from Disc — your files aren't touched"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
+
+      {removeTargets && (
         <ConfirmModal
-          title="Remove folder"
-          message={`Remove "${removeTarget.name}" from Disc? Your files on disk aren't touched — it just stops showing here.`}
-          confirmLabel="Remove"
+          title={removeTargets.length > 1 ? "Remove folders" : "Remove folder"}
+          message={
+            removeTargets.length > 1
+              ? `Remove ${removeTargets.length} folders from Disc? Your files on disk aren't touched — they just stop showing here.`
+              : `Remove "${removeTargets[0].name}" from Disc? Your files on disk aren't touched — it just stops showing here.`
+          }
+          confirmLabel={removeTargets.length > 1 ? `Remove ${removeTargets.length}` : "Remove"}
           onConfirm={() => {
-            onRemoveFolder(removeTarget.id);
-            setRemoveTarget(null);
+            onRemoveFolders(removeTargets.map((f) => f.id));
+            setSelectedIds(new Set());
+            setRemoveTargets(null);
           }}
-          onCancel={() => setRemoveTarget(null)}
+          onCancel={() => setRemoveTargets(null)}
         />
       )}
     </aside>

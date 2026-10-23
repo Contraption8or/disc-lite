@@ -156,9 +156,12 @@ export default function App() {
     if (fresh.length === 1) setActiveFolderId(fresh[0].id);
   }, []);
 
-  const handleRemoveFolder = useCallback((id) => {
-    setFolders((prev) => prev.filter((f) => f.id !== id));
-    setActiveFolderId((cur) => (parseSelection(cur).folderId === id ? "all" : cur));
+  // Takes a list so a multi-selection can go in one step. Only removes the
+  // folders from Disc's list — nothing on disk is touched.
+  const handleRemoveFolders = useCallback((ids) => {
+    const gone = new Set(ids);
+    setFolders((prev) => prev.filter((f) => !gone.has(f.id)));
+    setActiveFolderId((cur) => (gone.has(parseSelection(cur).folderId) ? "all" : cur));
   }, []);
 
   // Drag-to-reorder from the sidebar: put `dragId` just before/after `targetId`.
@@ -507,7 +510,7 @@ export default function App() {
       favoriteIds,
       onToggleFavorite: handleToggleFavorite,
       onAddFolders: handleAddFolders,
-      onRemoveFolder: handleRemoveFolder,
+      onRemoveFolders: handleRemoveFolders,
       onRenameFolder: handleRenameFolder,
       onMoveFolder: handleMoveFolder,
       onDropFiles: handleDropFiles,
@@ -538,7 +541,7 @@ export default function App() {
       favoriteIds,
       handleToggleFavorite,
       handleAddFolders,
-      handleRemoveFolder,
+      handleRemoveFolders,
       handleRenameFolder,
       handleMoveFolder,
       handleDropFiles,
