@@ -3,7 +3,7 @@ import LibraryToolbar from "./LibraryToolbar.jsx";
 import TrackRow from "./TrackRow.jsx";
 import { useDisc } from "../context/DiscContext.jsx";
 import { useVirtualRows } from "../hooks/useVirtualRows.js";
-import { parseSelection, isInSubfolder } from "../utils/folderTree.js";
+import { parseSelection } from "../utils/folderTree.js";
 import Icon from "./Icon.jsx";
 import "./LibraryPanel.css";
 
@@ -14,8 +14,8 @@ const ROW_HEIGHT = 50;
 export default function LibraryPanel() {
   const {
     folders,
-    folderTracks,
     allTracks,
+    getNodeTracks,
     missingFolderIds,
     activeFolderId,
     favoriteIds,
@@ -48,9 +48,9 @@ export default function LibraryPanel() {
       return allTracks.filter((t) => favs.has(t.id));
     }
     if (activeFolder) {
-      return (folderTracks[activeFolder.id] || [])
-        .filter((t) => isInSubfolder(t, selectedSub))
-        .map((t) => ({ ...t, folderId: activeFolder.id }));
+      // The folder's own tracks plus everything nested under it in the tree
+      // (including folders moved into it).
+      return getNodeTracks(activeFolderId);
     }
     return allTracks;
   }, [
@@ -59,8 +59,7 @@ export default function LibraryPanel() {
     allTracks,
     activeFolderId,
     activeFolder,
-    selectedSub,
-    folderTracks,
+    getNodeTracks,
     favoriteIds,
   ]);
 

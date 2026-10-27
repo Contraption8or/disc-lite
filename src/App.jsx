@@ -5,13 +5,16 @@ import LibraryPanel from "./components/LibraryPanel.jsx";
 import NowPlayingBar from "./components/NowPlayingBar.jsx";
 import { DiscContext } from "./context/DiscContext.jsx";
 import { toMediaUrl } from "./utils/paths.js";
-import { parseSelection, moveKeys } from "./utils/folderTree.js";
+import { parseSelection, buildModel, nodeTracks, isWithin, migrateSubOrder } from "./utils/folderTree.js";
 import "./App.css";
 
 const FOLDERS_KEY = "lite.folders";
 const FAVORITES_KEY = "disc.favorites";
 const VOLUME_KEY = "disc.volume";
 const SHUFFLE_KEY = "disc.shuffle";
+const PLACEMENT_KEY = "lite.placement"; // { nodeKey: parentKey } — folders moved under other folders
+const ORDER_KEY = "lite.order"; // { parentKey: [nodeKey, ...] } — display order of each parent's children
+const OLD_SUB_ORDER_KEY = "lite.subOrder"; // pre-nesting subfolder order, migrated into ORDER_KEY
 
 function loadJson(key, fallback) {
   try {
@@ -50,6 +53,15 @@ export default function App() {
     const parsed = loadJson(FAVORITES_KEY, []);
     return Array.isArray(parsed) ? parsed : [];
   });
+  const [placement, setPlacement] = useState(() => {
+    const saved = loadJson(PLACEMENT_KEY, {});
+    return saved && typeof saved === "object" ? saved : {};
+  });
+  const [order, setOrder] = useState(() => {
+    const saved = loadJson(ORDER_KEY, null);
+    if (saved && typeof saved === "object") return saved;
+    return migrateSubOrder(loadJson(OLD_SUB_ORDER_KEY, {}));
+  });
   const [pinned, setPinned] = useState(false);
   const foldersRef = useRef(folders);
   foldersRef.current = folders;
@@ -62,6 +74,15 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(favoriteIds));
   }, [favoriteIds]);
+
+  useEffect(() => {
+    localStorage.setItem(PLACEMENT_KEY, JSON.stringify(placement));
+  }, [placement]);
+
+  useEffect(() => {
+    localStorage.setItem(ORDER_KEY, JSON.stringify(order));
+    localStorage.removeItem(OLD_SUB_ORDER_KEY);
+  }, [order]);
 
   // Scans one folder. A null result means the directory itself is
   // unreachable (an unplugged drive, say) — keep the last-known tracks and
@@ -137,6 +158,17 @@ export default function App() {
   const allTracksRef = useRef(allTracks);
   allTracksRef.current = allTracks;
 
+  // The sidebar tree (see utils/folderTree.js): every folder and subfolder,
+  // where each one currently sits, and their order.
+  const model = useMemo(
+    () => buildModel(folders, folderTracks, placement, order),
+    [folders, folderTracks, placement, order]
+  );
+  const modelRef = useRef(model);
+  modelRef.current = model;
+  // What a node shows: its own tracks plus everything nested under it.
+  const getNodeTracks = useCallback((key) => nodeTracks(model, key), [model]);
+
   const handleAddFolders = useCallback(async () => {
     if (!window.disc) return;
     const picked = await window.disc.chooseFolders();
@@ -159,19 +191,58 @@ export default function App() {
   // folders from Disc's list — nothing on disk is touched.
   const handleRemoveFolders = useCallback((ids) => {
     const gone = new Set(ids);
+    // Drop saved moves/orders that mention a removed folder (or anything in it).
+    const mentionsGone = (key) => key !== "" && gone.has(parseSelection(key).folderId);
+    setPlacement((prev) => {
+      const next = {};
+      for (const [k, v] of Object.entries(prev)) if (!mentionsGone(k) && !mentionsGone(v)) next[k] = v;
+      return next;
+    });
+    setOrder((prev) => {
+      const next = {};
+      for (const [k, list] of Object.entries(prev)) {
+        if (mentionsGone(k) || !Array.isArray(list)) continue;
+        next[k] = list.filter((x) => !mentionsGone(x));
+      }
+      return next;
+    });
     setFolders((prev) => prev.filter((f) => !gone.has(f.id)));
     setActiveFolderId((cur) => (gone.has(parseSelection(cur).folderId) ? "all" : cur));
   }, []);
 
-  // Drag-to-reorder from the sidebar: put `ids` (one folder, or a whole
-  // multi-selection, keeping their relative order) just before/after
-  // `targetId`.
-  const handleMoveFolders = useCallback((ids, targetId, pos) => {
-    setFolders((prev) => {
-      const order = moveKeys(prev.map((f) => f.id), ids, targetId, pos);
-      const byId = new Map(prev.map((f) => [f.id, f]));
-      const next = order.map((id) => byId.get(id));
-      return next.every((f, i) => f === prev[i]) ? prev : next;
+  // Drag-and-drop in the sidebar: put `keys` (one node, or a whole
+  // multi-selection, in the order given) under `parentKey` ("" = the top
+  // level), just before `beforeKey` — or at the end if that's null. Purely
+  // an arrangement inside Disc; nothing on disk moves.
+  const handleMoveNodes = useCallback((keys, parentKey, beforeKey) => {
+    const m = modelRef.current;
+    if (!keys.length || !keys.every((k) => m.nodes.has(k))) return;
+    if (parentKey !== "" && !m.nodes.has(parentKey)) return;
+    // Never into itself or anything inside it.
+    if (parentKey !== "" && keys.some((k) => isWithin(m, parentKey, k))) return;
+
+    const siblings = (m.childrenOf.get(parentKey) || []).map((n) => n.key);
+    // If the spot we were asked to drop before is itself being moved, use
+    // the next sibling that isn't.
+    let anchor = beforeKey;
+    if (anchor && keys.includes(anchor)) {
+      const start = siblings.indexOf(anchor);
+      anchor = siblings.slice(start + 1).find((k) => !keys.includes(k)) ?? null;
+    }
+    const rest = siblings.filter((k) => !keys.includes(k));
+    let at = anchor ? rest.indexOf(anchor) : -1;
+    if (at === -1) at = rest.length;
+    rest.splice(at, 0, ...keys);
+
+    setOrder((prev) => ({ ...prev, [parentKey]: rest }));
+    setPlacement((prev) => {
+      const next = { ...prev };
+      for (const k of keys) {
+        // Back under its natural parent needs no override.
+        if (m.nodes.get(k).naturalParent === parentKey) delete next[k];
+        else next[k] = parentKey;
+      }
+      return next;
     });
   }, []);
 
@@ -502,7 +573,9 @@ export default function App() {
       onAddFolders: handleAddFolders,
       onRemoveFolders: handleRemoveFolders,
       onRenameFolder: handleRenameFolder,
-      onMoveFolders: handleMoveFolders,
+      model,
+      getNodeTracks,
+      onMoveNodes: handleMoveNodes,
       onDropFiles: handleDropFiles,
       onDeleteTrack: handleDeleteTrack,
       onRenameTrackFile: handleRenameTrackFile,
@@ -535,7 +608,9 @@ export default function App() {
       handleAddFolders,
       handleRemoveFolders,
       handleRenameFolder,
-      handleMoveFolders,
+      model,
+      getNodeTracks,
+      handleMoveNodes,
       handleDropFiles,
       handleDeleteTrack,
       handleRenameTrackFile,

@@ -14,6 +14,7 @@
 }
 
 .sidebar__scroll {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -136,34 +137,29 @@
   pointer-events: none;
 }
 
-/* Drag-to-reorder: a white line shows where the folder will land. */
-.sidebar__block {
-  position: relative;
-}
-
+/* Drag and drop: while dragging, rows being dragged dim, a white line shows
+   where the folder will land between rows, and a folder you'd be dropping
+   *into* is outlined. */
 .sidebar__block--dragging {
   opacity: 0.4;
 }
 
-.sidebar__block--drop-before::before,
-.sidebar__block--drop-after::after {
-  content: "";
+.sidebar__dropline {
   position: absolute;
-  left: var(--line-left, 4px);
   right: 4px;
   height: 2px;
+  margin-top: -1px;
   border-radius: 1px;
   background: var(--accent);
   z-index: 2;
   pointer-events: none;
 }
 
-.sidebar__block--drop-before::before {
-  top: -1px;
-}
-
-.sidebar__block--drop-after::after {
-  bottom: -1px;
+.sidebar__row--drop-into,
+.sidebar__row--drop-into:hover {
+  background: var(--bg-active);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text-primary);
 }
 
 /* Only appears on hover so the list stays plain text. */
