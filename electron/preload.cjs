@@ -35,16 +35,4 @@ contextBridge.exposeInMainWorld("disc", {
   // of a file the user drags in from Explorer.
   getPathForFile: (file) => webUtils.getPathForFile(file),
 
-  // Frameless window controls + the window-snap system.
-  windowMinimize: () => ipcRenderer.send("disc:window-minimize"),
-  windowToggleMaximize: () => ipcRenderer.invoke("disc:window-toggle-maximize"),
-  windowIsMaximized: () => ipcRenderer.invoke("disc:window-is-maximized"),
-  windowClose: () => ipcRenderer.send("disc:window-close"),
-  setSnapAccentColor: (hex) => ipcRenderer.send("disc:set-snap-accent-color", hex),
-  notifyMouseUp: () => ipcRenderer.send("disc:mouse-up"),
-  onWindowMaximizedChanged: (callback) => {
-    const listener = (_event, isMaximized) => callback(isMaximized);
-    ipcRenderer.on("disc:window-maximized-changed", listener);
-    return () => ipcRenderer.removeListener("disc:window-maximized-changed", listener);
-  },
 });

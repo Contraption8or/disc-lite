@@ -1,28 +1,9 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeImage, Menu, shell, clipboard, screen, protocol } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, Menu, shell, clipboard, protocol } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { watch, readFileSync, appendFileSync, createReadStream } from "node:fs";
+import { watch, appendFileSync, createReadStream } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
-import os from "node:os";
-import { createRequire } from "node:module";
-
-// mouse-state is a Windows-only native addon (CommonJS, so it needs
-// createRequire from this ESM file) — see native/mouse-state/mouse_state.cc
-// and the comment above setupWindowSnap below for why it's needed at all.
-// Loaded defensively: it may not be built (missing Visual Studio Build
-// Tools, or it simply failed to build), and Disc must keep working
-// perfectly well without it — the window-snap system just falls back to
-// its slower timer-based heuristic for detecting drag-end.
-const require = createRequire(import.meta.url);
-let mouseState = null;
-if (process.platform === "win32") {
-  try {
-    mouseState = require("mouse-state");
-  } catch {
-    mouseState = null;
-  }
-}
 
 // Dev-only escape hatch so a second checkout (a git worktree used for
 // testing a branch, for instance) doesn't share userData — and therefore
@@ -126,10 +107,7 @@ let mainWindow = null;
 const folderWatchers = new Map(); // key -> FSWatcher
 const watchDebounceTimers = new Map(); // key -> Timeout
 
-// --- Persisted app settings (not the music-library data — just things
-// like the memory limit that have to be known before the window/renderer
-// even exists) ---------------------------------------------------------
-const settingsPath = path.join(app.getPath("userData"), "disc-settings.json");
+// Where render-process crashes get logged.
 const crashLogPath = path.join(app.getPath("userData"), "crash-log.jsonl");
 
 // Where a marked section's trimmed clip lives for dragging out to Premiere
@@ -141,49 +119,10 @@ const crashLogPath = path.join(app.getPath("userData"), "crash-log.jsonl");
 // keep existing. Named with a leading dot, and explicitly skipped by the
 // folder scanner below, so it never shows up as a real library track.
 const SECTIONS_DIR_NAME = ".disc-sections";
-function loadSettings() {
-  try {
-    return JSON.parse(readFileSync(settingsPath, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-// --- Studio Sync: per-device identity + append-only event log ---------
-// See docs/collab-sync-scope.md. Each install gets a random id (never
-// synced — it's what names this device's own log file) and an editable
-// display name. Deliberately stored outside userData's Local Storage
-// (which is what the renderer's own localStorage uses) since this needs
-// to be readable before/without a renderer at all, same reasoning as
-// disc-settings.json above.
-
 // Folder used inside a shared/synced music directory for the event log —
 // same "dot-prefixed, explicitly skipped by the scanner" pattern as
 // SECTIONS_DIR_NAME above, so it never shows up as library content.
 const SYNC_DIR_NAME = ".disc-sync";
-
-// V8's heap size flag only takes effect if set before the app (and its
-// renderer processes) actually start, so this has to happen here at the
-// top of the file — a runtime IPC call later would be too late.
-const startupSettings = loadSettings();
-if (startupSettings.memoryLimitMb) {
-  app.commandLine.appendSwitch(
-    "js-flags",
-    `--max-old-space-size=${startupSettings.memoryLimitMb}`
-  );
-}
-
-// Same timing requirement as the memory flag above: UV_THREADPOOL_SIZE
-// only takes effect if set before the very first async fs (or other
-// libuv-threadpool-backed) operation runs, so this has to happen here
-// too — before app ready, before any folder scan or file read. This is
-// the file-I/O side of "more CPU" (reading many audio files at once);
-// it's separate from — and doesn't affect — Chromium's own internal
-// audio-decode threading, which manages itself and isn't something this
-// app can tune directly.
-if (startupSettings.threadPoolSize) {
-  process.env.UV_THREADPOOL_SIZE = String(startupSettings.threadPoolSize);
-}
 
 // Used as the little icon that follows the cursor during a native
 // drag-out (e.g. dragging a track's waveform into Premiere Pro).
@@ -191,88 +130,10 @@ const dragIcon = nativeImage.createFromPath(
   path.join(__dirname, "assets", "drag-icon.png")
 );
 
-// No native File/Edit/View/Window/Help menu bar — Disc draws its own
-// title bar entirely, themed to match whatever theme is active.
+// A plain window with no File/Edit/View menu bar — just the native title bar.
 Menu.setApplicationMenu(null);
-
-// Several themes' (Tron, Sunset, Emerald, Abyss, Ember, Midnight, Blush)
-// blurred-desktop background is real Windows 11 Mica/Acrylic
-// (win.backgroundMaterial), not a CSS trick — CSS backdrop-filter can only
-// blur other content already rendered inside the page, it has no way to
-// reach the actual desktop/other windows behind a transparent Electron
-// window, which is what "blur what's behind it" actually requires.
-// backgroundMaterial is a Windows-11-only, constructor-time-only option (no
-// supported way to flip it on a live window), so switching to one of these
-// themes needs a restart to take visual effect — same "changes a startup
-// flag, needs a relaunch" pattern already used for the memory-limit and
-// CPU-thread settings above.
-//
-// Windows 10 and 11 both report process.platform === "win32" and even the
-// same os.release() major/minor ("10.0") — the only thing that actually
-// tells them apart is the build number, which jumps to 22000+ on 11. That
-// distinction matters here specifically: setting transparent + a
-// backgroundMaterial the compositor doesn't support is what was causing
-// real Windows 10 users theme-switching crashes and a blank/broken window,
-// not just a missing visual effect. Gating on the real build number keeps
-// Windows 10 on the plain opaque window path — acrylic-tagged themes still
-// render (translucent CSS panels, just with no real blur behind them,
-// exactly as themes.js's requiresAcrylic comment already describes as the
-// intended non-Windows-11 fallback), it just never touches transparent /
-// backgroundMaterial at all.
-const isWindows11 =
-  process.platform === "win32" && parseInt(os.release().split(".")[2] || "0", 10) >= 22000;
-const useAcrylic = isWindows11 && Boolean(startupSettings.useAcrylic);
-
-// --- Rounded window corners ---------------------------------------------
-// Windows 11 rounds every normal top-level window's corners by default,
-// but a frameless (WS_POPUP-style) BrowserWindow like Disc's opts itself
-// out of that automatically — DWM clips the window's actual surface, not
-// something CSS can influence, so getting Disc's corners to look like
-// every other window on the desktop needs the native
-// setWindowCornerPreference helper from native/mouse-state (see its
-// mouse_state.cc for why it lives in that addon).
-const DWMWCP_DONOTROUND = 1;
-const DWMWCP_ROUND = 2;
-
-// Tracks the corner state actually applied to each window so resize
-// events (which fire continuously while the user drags an edge) only
-// make the native call on an actual change, not on every pixel of drag.
-const appliedCornerPreference = new WeakMap();
-
-function applyWindowCornerPreference(win, preference) {
-  if (!isWindows11 || !mouseState?.setWindowCornerPreference) return;
-  if (!win || win.isDestroyed()) return;
-  if (appliedCornerPreference.get(win) === preference) return;
-  try {
-    mouseState.setWindowCornerPreference(win.getNativeWindowHandle(), preference);
-    appliedCornerPreference.set(win, preference);
-  } catch {
-    // Cosmetic only — never worth crashing over.
-  }
-}
-
-// A window "fills its display" when maximized OR (via our own snap
-// system's "top" zone, which resizes to the full work area via setBounds
-// rather than an actual OS-level maximize) sized to cover the display's
-// entire work area edge-to-edge. Either way it should look flush with
-// the screen — square corners, exactly like Windows' own maximized
-// windows — rather than visibly rounded ones cutting into the display.
-function windowFillsDisplay(win) {
-  if (win.isMaximized()) return true;
-  const bounds = win.getBounds();
-  const { workArea } = screen.getDisplayMatching(bounds);
-  return (
-    bounds.x <= workArea.x &&
-    bounds.y <= workArea.y &&
-    bounds.x + bounds.width >= workArea.x + workArea.width &&
-    bounds.y + bounds.height >= workArea.y + workArea.height
-  );
-}
-
-function updateWindowCorners(win) {
-  if (!win || win.isDestroyed()) return;
-  applyWindowCornerPreference(win, windowFillsDisplay(win) ? DWMWCP_DONOTROUND : DWMWCP_ROUND);
-}
+// Follow a dark title bar (this app is black).
+nativeTheme.themeSource = "dark";
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -280,24 +141,7 @@ function createWindow() {
     height: 800,
     minWidth: 760,
     minHeight: 480,
-    // A fully-opaque backgroundColor would paint over the acrylic material
-    // before Disc's own (semi-transparent, for these themes) CSS
-    // backgrounds ever get a chance to show it through. transparent:true is
-    // what actually makes Chromium preserve alpha when compositing the
-    // page — without it, the renderer assumes an opaque surface and the
-    // whole page effectively fails to paint over the native material
-    // instead of blending with it (shows up as a real blurred backdrop
-    // with the entire Disc UI missing).
-    backgroundColor: useAcrylic ? "#00000000" : "#000000",
-    // Deliberately not just "Disc" — launch-disc.vbs uses AppActivate to
-    // detect whether the app is already running before deciding to launch
-    // it, and AppActivate does a case-insensitive *prefix* match against
-    // every open window's title. A plain "Disc" title can match something
-    // else entirely (a File Explorer window for a folder literally named
-    // "disc", say), which AppActivate happily "activates" (brings to
-    // front) instead of ever starting the app — the launcher silently
-    // does nothing. This longer, more specific title is unlikely to
-    // prefix-match anything else.
+    backgroundColor: "#000000",
     title: "Disc Lite",
     // Without this, dev mode (`electron .`, not a packaged build) shows
     // Electron's own generic default icon in the taskbar instead of
@@ -306,8 +150,6 @@ function createWindow() {
     // that only applies once actually built; running from source needs
     // it set explicitly.
     icon: path.join(__dirname, "assets", "disc-icon.ico"),
-    frame: false,
-    ...(useAcrylic ? { backgroundMaterial: "acrylic", transparent: true } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -329,39 +171,14 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   }
 
-  // Electron syncs the window title to the page's own <title> on every
-  // navigation/reload by default, which would silently undo the title set
-  // above (index.html's <title> is just "Disc") — launch-disc.vbs depends
-  // on the window title staying exactly "Disc Lite" to reliably
-  // detect an already-running instance (see comment there), so that has to
-  // win over whatever the page sets.
+  // Keep the window title as "Disc Lite" — Electron would otherwise swap in
+  // the page's own <title> on every navigation.
   mainWindow.on("page-title-updated", (event) => {
     event.preventDefault();
   });
 
-  // "Maximized" no longer means real OS-level win.maximize() at all (see
-  // disc:window-toggle-maximize below for why) — these two just keep
-  // corner-rounding in sync on the off chance something outside this
-  // file's own code puts the window into that state (Win+Up, say).
-  // disc:window-maximized-changed is sent from the toggle handler now,
-  // not here, so there's exactly one source of truth for that.
-  mainWindow.on("maximize", () => updateWindowCorners(mainWindow));
-  mainWindow.on("unmaximize", () => updateWindowCorners(mainWindow));
-  // Covers every other way the window's size can change — our own snap
-  // system's release-triggered setBounds (including the "top" zone,
-  // which fills the work area without ever calling win.maximize()) and
-  // the user manually dragging an edge — so corners stay in sync with
-  // whatever's actually on screen, not just real OS-level maximize.
-  mainWindow.on("resize", () => updateWindowCorners(mainWindow));
-
-  // The main *process* surviving a renderer crash doesn't mean the user
-  // is fine — Disc's title bar (including its close button) is drawn by
-  // the same renderer that just died, so a crash otherwise leaves a
-  // window that's stuck on screen, blank, with no way to close it short
-  // of Alt+F4 or Task Manager. Logs first (so there's a record even if
-  // nobody was watching when it happened), then a native dialog for
-  // recovery — native because it doesn't depend on the crashed page to
-  // render, unlike everything else in this app.
+  // If the renderer crashes, log it, then offer Reload/Close in a native
+  // dialog (native because it doesn't depend on the crashed page).
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     try {
       const entry = {
@@ -380,7 +197,7 @@ function createWindow() {
         title: "Disc crashed",
         message: `Disc's window stopped responding (${details.reason}).`,
         detail:
-          "This has been logged (Settings → Troubleshooting has a button to find the log). Reload to keep working, or close the window.",
+          "This has been logged. Reload to keep working, or close the window.",
         buttons: ["Reload", "Close"],
         defaultId: 0,
         cancelId: 1,
@@ -398,532 +215,8 @@ function createWindow() {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
-    teardownWindowSnap();
-  });
-
-  setupWindowSnap(mainWindow);
-  updateWindowCorners(mainWindow);
-  // Created up front, not lazily on the first drag — a data: URL loads
-  // near-instantly, but "near" still isn't zero, and creating this
-  // window for the first time in the middle of the very first drag was
-  // one of the things contributing to that first preview looking like a
-  // flicker rather than a clean fade in.
-  ensureSnapPreviewWindow();
-}
-
-// --- Window snapping ---------------------------------------------------
-// A from-scratch, OS-independent replacement for Windows' own Snap —
-// dragging the title bar to a screen edge shows a preview and, on
-// release, resizes the window to that zone. Electron's own
-// -webkit-app-region:drag moves the window itself rather than handing off
-// to a real native move gesture, so DWM's actual Snap engine never
-// engages no matter how the title bar is set up (see the git history for
-// the earlier, abandoned attempt to get real native Snap working, both
-// via a native addon and by giving non-acrylic themes an actual native
-// frame) — this sidesteps that entirely by not depending on it at all.
-// Works identically for every theme, including acrylic/transparent ones,
-// which native Snap fundamentally couldn't support.
-const SNAP_EDGE_PX = 28; // distance from a work-area edge that counts as "in the zone"
-const SNAP_ARM_MOVES = 3; // consecutive 'move' events required before treating this as a real drag, not an incidental programmatic setBounds
-// Chromium doesn't deliver a normal DOM mouseup for the button that
-// started a -webkit-app-region:drag window move — confirmed by testing,
-// not just suspected: instrumented both paths and every single release
-// during a real drag only ever hit the fallback timer, never a mouseup
-// event, no matter how the drag ended. mouseState (see the require above)
-// sidesteps that by polling Windows directly for whether the button is
-// still physically held, checked every SNAP_POLL_MS while a drag might be
-// active — this is what actually ends a drag now. SNAP_DRAG_END_MS below
-// only matters as a fallback on non-Windows/pre-mouseState-build systems.
-const SNAP_POLL_MS = 40;
-const SNAP_DRAG_END_MS = 3000; // fallback only, and only when mouseState isn't available at all — see the comment above. Deliberately long so it can never mistake an ordinary mid-drag pause for the drag having ended.
-
-let snapPreviewWindow = null;
-let snapMoveTimer = null;
-let snapPollTimer = null;
-let snapMoveStreak = 0;
-let snapPendingZone = null; // { type, display } | null
-let snapTargetWindow = null;
-// Which zone the preview is *currently showing* (not just whatever the
-// cursor happens to be over this instant) — used two ways below: as a
-// hysteresis band (once a zone is active, leaving it needs a bigger move
-// than entering it did, so ordinary hand jitter right at the boundary
-// during a real drag doesn't flicker the preview in and out), and to skip
-// re-issuing setBounds/show on every single 'move' event while the
-// cursor sits still inside the same zone (each 'move' event redoes this
-// work otherwise, which is its own separate source of visible flicker).
-let snapActiveZoneType = null;
-// Accent color for the preview — piped in from the renderer (see
-// disc:set-snap-accent-color below) since only it can read the active
-// theme's actual CSS custom property; this is just the last value it
-// reported, with a reasonable default before that first report arrives.
-let snapAccentRgb = "79, 157, 255";
-// Windows-style "un-snap on drag away, back to whatever size it was
-// before" — snapWasFree holds the exact bounds the window had right
-// before its *first* snap in the current streak (snapping left, then top,
-// then right in one continuous session must all restore to that same
-// original size, not to "left" when un-snapping from "top"). Guarded by
-// isSnapped so it's only captured once per streak, and cleared once the
-// window is actually back to a free size.
-let snapIsSnapped = false;
-let snapFreeBounds = null;
-// A short ignore-window (timestamp, not a one-shot flag) set right before
-// this module calls setBounds on the real window itself, so the 'move'
-// event(s) that call triggers don't get misread as the user still
-// actively dragging. This has to be a window, not a single-consume
-// boolean: one setBounds call can fire more than one 'move' event, and a
-// boolean only swallows the first — the rest were slipping through,
-// re-arming the whole system off our *own* resize and causing a visibly
-// laggy, sometimes-snaps-back-to-the-big-size mess.
-let snapIgnoreMoveUntil = 0;
-const SNAP_IGNORE_MOVE_MS = 120;
-
-function markProgrammaticMove() {
-  snapIgnoreMoveUntil = Date.now() + SNAP_IGNORE_MOVE_MS;
-}
-
-// Snap/un-snap just resizes the window outright — no animation. Earlier
-// versions tried a few: tweening the real window's own bounds directly
-// (~60 setBounds calls a second, visibly staggery, since Windows redoes
-// a full layout/repaint of Disc's entire real UI on every one), a CSS
-// clip-path on the real page content (still not smooth — Disc's own
-// live content can force its own repaints regardless of will-change,
-// competing with the animation for main-thread time), then a FLIP
-// transform played over a static snapshot of the window (smooth, but
-// still felt "clunky" — an extra visual event on top of what's already
-// an instant, deliberate action). Landed here: the window just resizes,
-// same as clicking a normal maximize/restore button anywhere else.
-function resizeSnapTarget(win, to) {
-  if (win.isDestroyed()) return;
-  markProgrammaticMove();
-  win.setBounds(to);
-}
-
-// Where a restored (un-snapped) window lands, given the size it's being
-// restored to — horizontally centered on its current display, at
-// whatever height the (still snapped/maximized) window's own top edge
-// is currently at, not the monitor's top edge. Every snap zone (see
-// snapZoneBounds) starts flush with the display's own left edge, so just
-// keeping the window's current x on restore meant it always landed in
-// the top-left corner of the screen no matter which zone or the
-// maximize button it came from — centering just the x reads as a
-// deliberate "here's your window back" placement instead, without
-// moving it somewhere its top edge wasn't already.
-function unsnapPosition(win, size) {
-  const current = win.getBounds();
-  const { workArea } = screen.getDisplayMatching(current);
-  return {
-    x: Math.round(workArea.x + (workArea.width - size.width) / 2),
-    y: current.y,
-  };
-}
-
-function getSnapZone(point) {
-  const display = screen.getDisplayNearestPoint(point);
-  const { x, y, width, height } = display.workArea;
-  const relX = point.x - x;
-  const relY = point.y - y;
-  const threshold = snapActiveZoneType ? SNAP_EDGE_PX * 2 : SNAP_EDGE_PX;
-  const nearTop = relY <= threshold;
-  const nearLeft = relX <= threshold;
-  const nearRight = relX >= width - threshold;
-
-  if (nearTop && nearLeft) return { type: "top-left", display };
-  if (nearTop && nearRight) return { type: "top-right", display };
-  if (nearTop) return { type: "top", display };
-  if (nearLeft) return { type: "left", display };
-  if (nearRight) return { type: "right", display };
-  return null;
-}
-
-function hexToRgbString(hex) {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex).trim());
-  if (!m) return null;
-  return `${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}`;
-}
-
-// How long the preview fades in/out over — kept in one place since both
-// the CSS transition duration and the JS timer that waits for it to
-// finish before actually hiding the window need to agree.
-const SNAP_PREVIEW_FADE_MS = 140;
-// How far the rounded "card" sits in from the zone's true edges.
-const SNAP_PREVIEW_INSET = 10;
-
-function snapPreviewHtml() {
-  // A rounded, inset "card" rather than a flat edge-to-edge rectangle —
-  // matches how Windows' own snap-assist preview looks (a soft-shadowed
-  // rounded panel floating a few pixels in from the zone's true edges),
-  // which reads as far more deliberate than a plain colored box.
-  //
-  // The card's left/top/width/height are plain (untransitioned) inline
-  // styles set by showSnapPreview below, in coordinates *relative to
-  // this window* — deliberately not `inset`/percentage-based, since this
-  // window itself no longer resizes per zone (see the comment on
-  // showSnapPreview for why: resizing a transparent BrowserWindow is
-  // what was actually producing the "pops twice" look, not the fade
-  // logic). Only opacity/transform are transitioned, so switching which
-  // zone is showing repositions the card instantly while the fade stays
-  // smooth.
-  const html = `
-    <style>
-      html, body {
-        margin: 0;
-        width: 100%;
-        height: 100%;
-        background: transparent;
-        overflow: hidden;
-      }
-      .zone {
-        position: absolute;
-        left: 0px;
-        top: 0px;
-        width: 0px;
-        height: 0px;
-        border-radius: 14px;
-        background: linear-gradient(165deg,
-          rgba(${snapAccentRgb}, 0.32),
-          rgba(${snapAccentRgb}, 0.16));
-        border: 1.5px solid rgba(${snapAccentRgb}, 0.85);
-        box-shadow:
-          0 16px 40px rgba(0, 0, 0, 0.35),
-          0 2px 8px rgba(0, 0, 0, 0.2),
-          inset 0 1px 0 rgba(255, 255, 255, 0.14);
-        opacity: 0;
-        transform: scale(0.96);
-        transform-origin: center center;
-        transition: opacity ${SNAP_PREVIEW_FADE_MS}ms cubic-bezier(0.16, 1, 0.3, 1),
-          transform ${SNAP_PREVIEW_FADE_MS}ms cubic-bezier(0.16, 1, 0.3, 1);
-      }
-      .zone.zone--visible {
-        opacity: 1;
-        transform: scale(1);
-      }
-    </style>
-    <div class="zone" id="zone"></div>
-  `;
-  return "data:text/html," + encodeURIComponent(html);
-}
-
-function snapZoneBounds(zone) {
-  const { x, y, width, height } = zone.display.workArea;
-  const halfW = Math.round(width / 2);
-  const halfH = Math.round(height / 2);
-  switch (zone.type) {
-    case "top":
-      return { x, y, width, height };
-    case "left":
-      return { x, y, width: halfW, height };
-    case "right":
-      return { x: x + halfW, y, width: width - halfW, height };
-    case "top-left":
-      return { x, y, width: halfW, height: halfH };
-    case "top-right":
-      return { x: x + halfW, y, width: width - halfW, height: halfH };
-    default:
-      return null;
-  }
-}
-
-function ensureSnapPreviewWindow() {
-  if (snapPreviewWindow && !snapPreviewWindow.isDestroyed()) return snapPreviewWindow;
-  // Sized to the *whole primary display* up front, not to any particular
-  // zone — see showSnapPreview for why: this window's own OS-level
-  // bounds should essentially never change once created (resizing a
-  // transparent window is what produces a visible flash, since DWM has
-  // no valid composited content for the new size until the next repaint
-  // lands). Which zone is actually showing, and where within this
-  // window, is purely an in-page position from here on.
-  const initialBounds = screen.getPrimaryDisplay().bounds;
-  snapPreviewWindow = new BrowserWindow({
-    ...initialBounds,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    movable: false,
-    focusable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    hasShadow: false,
-    show: false,
-  });
-  // Click-through — this window only ever displays a preview rectangle,
-  // it must never intercept the drag that's still happening in the real
-  // window underneath it.
-  snapPreviewWindow.setIgnoreMouseEvents(true);
-  snapPreviewWindow.loadURL(snapPreviewHtml());
-  // Shown exactly once, right here, and never hidden again for the rest
-  // of the app's life (see showSnapPreview/hideSnapPreview — from here
-  // on, "showing"/"hiding" the zone is purely the CSS opacity transition
-  // on the .zone div, not the window itself). A hidden BrowserWindow
-  // stops compositing entirely, so the very first frame after a later
-  // show()/showInactive() call can lag behind — Chromium hasn't
-  // re-rendered yet, so whatever DWM had cached for that window (which
-  // can be genuinely blank/undefined content) gets presented for a
-  // frame first. That's an actual flash no CSS transition can paper
-  // over, since it happens *before* any of this window's own content is
-  // involved. Showing it once here, at content-transparent/opacity:0,
-  // long before any real drag, means that first-frame cost is paid at
-  // startup where nothing is on screen to flash — never during a drag.
-  snapPreviewWindow.showInactive();
-  return snapPreviewWindow;
-}
-
-// Whether the .zone div's 'zone--visible' class is currently applied —
-// tracked here rather than read back from the window, since the window
-// itself is always "visible" now (see the comment above) and no longer
-// says anything about whether a zone is actually showing.
-let snapPreviewShown = false;
-
-function setSnapPreviewVisibleClass(win, visible) {
-  if (!win || win.isDestroyed()) return;
-  const script = `
-    (function () {
-      var el = document.getElementById('zone');
-      if (!el) return;
-      el.classList[${visible ? "'add'" : "'remove'"}]('zone--visible');
-    })();
-  `;
-  win.webContents.executeJavaScript(script).catch(() => {});
-}
-
-// Grazing a zone boundary for a single 'move' event during a real drag
-// (the cursor briefly reads as "in no zone" right at the edge between
-// two of them) used to hide the preview immediately, only to show it
-// again a moment later — visually a hide/show pop rather than the zone
-// just staying up. This debounce holds off actually starting the
-// fade-out until the cursor has stayed out of every zone for a beat;
-// showSnapPreview cancels it outright the moment a zone reappears.
-const SNAP_PREVIEW_HIDE_DEBOUNCE_MS = 90;
-let snapPreviewHideDebounceTimer = null;
-
-function showSnapPreview(zone) {
-  clearTimeout(snapPreviewHideDebounceTimer);
-  snapPreviewHideDebounceTimer = null;
-
-  const preview = ensureSnapPreviewWindow();
-
-  // The window itself only ever gets resized when the drag has actually
-  // moved to a *different display* — essentially never on a single
-  // monitor, which is the common case. Which zone is showing, and where
-  // within this window, is purely an in-page position from here (see
-  // left/top/width/height below), so a plain zone-to-zone change never
-  // touches the window's bounds at all.
-  const displayBounds = zone.display.bounds;
-  const current = preview.getBounds();
-  const sameDisplay =
-    current.x === displayBounds.x &&
-    current.y === displayBounds.y &&
-    current.width === displayBounds.width &&
-    current.height === displayBounds.height;
-  if (!sameDisplay) preview.setBounds(displayBounds);
-
-  const zoneBounds = snapZoneBounds(zone);
-  const left = zoneBounds.x - displayBounds.x + SNAP_PREVIEW_INSET;
-  const top = zoneBounds.y - displayBounds.y + SNAP_PREVIEW_INSET;
-  const width = zoneBounds.width - SNAP_PREVIEW_INSET * 2;
-  const height = zoneBounds.height - SNAP_PREVIEW_INSET * 2;
-
-  const alreadyShown = snapPreviewShown;
-  snapPreviewShown = true;
-
-  const script = alreadyShown
-    ? // Already showing a zone (just switching which one is
-      // highlighted) — reposition instantly, no fade involved at all.
-      `
-      (function () {
-        var el = document.getElementById('zone');
-        if (!el) return;
-        el.style.left = '${left}px';
-        el.style.top = '${top}px';
-        el.style.width = '${width}px';
-        el.style.height = '${height}px';
-      })();
-    `
-    : // Newly appearing — position it first, then fade in. rAF so the
-      // "start invisible" position and the "become visible" class
-      // change land in different frames; without that gap there's
-      // nothing for the transition to actually animate from.
-      `
-      (function () {
-        var el = document.getElementById('zone');
-        if (!el) return;
-        el.style.left = '${left}px';
-        el.style.top = '${top}px';
-        el.style.width = '${width}px';
-        el.style.height = '${height}px';
-        requestAnimationFrame(function () {
-          el.classList.add('zone--visible');
-        });
-      })();
-    `;
-  preview.webContents.executeJavaScript(script).catch(() => {});
-}
-
-function requestHideSnapPreview() {
-  clearTimeout(snapPreviewHideDebounceTimer);
-  snapPreviewHideDebounceTimer = setTimeout(() => {
-    snapPreviewHideDebounceTimer = null;
-    hideSnapPreview();
-  }, SNAP_PREVIEW_HIDE_DEBOUNCE_MS);
-}
-
-// Just removes the CSS class — the window itself is never hidden (see
-// ensureSnapPreviewWindow), so this is a plain, always-live CSS opacity
-// transition playing out on screen, guaranteed to actually be visible as
-// a fade-out rather than racing a win.hide() call to get there first.
-function hideSnapPreview() {
-  clearTimeout(snapPreviewHideDebounceTimer);
-  snapPreviewHideDebounceTimer = null;
-  if (!snapPreviewShown) return;
-  snapPreviewShown = false;
-  setSnapPreviewVisibleClass(snapPreviewWindow, false);
-}
-
-// Only ever called once per drag — the window's actual size/position is
-// never touched mid-drag (see setupWindowSnap below for why: an earlier
-// version resized on every zone change during the drag itself, calling
-// setBounds while Windows' own native move loop was still actively
-// driving the window, and the two fought each other — visually the
-// window would briefly shrink, then get yanked back to its snapped size
-// and stay stuck to the cursor until release). Whatever the window's
-// bounds happen to be when this runs is just left as the native drag
-// left them, unless a zone applies.
-function finishSnapDrag() {
-  clearTimeout(snapMoveTimer);
-  clearInterval(snapPollTimer);
-  snapPollTimer = null;
-  if (snapTargetWindow && !snapTargetWindow.isDestroyed()) {
-    if (snapPendingZone) {
-      if (snapTargetWindow.isMaximized()) snapTargetWindow.unmaximize();
-      // Only the *first* snap in a streak overwrites the size to restore
-      // to later — snapping left, then top, then right without ever
-      // letting go of a free size in between must all still restore back
-      // to the one true original, not to whichever snap preceded this.
-      if (!snapIsSnapped) snapFreeBounds = snapTargetWindow.getBounds();
-      resizeSnapTarget(snapTargetWindow, snapZoneBounds(snapPendingZone));
-      snapIsSnapped = true;
-    } else if (snapIsSnapped && snapFreeBounds) {
-      // Released away from any zone while the window was still snapped —
-      // un-snap: restore the original size, centered at the top of the
-      // display (see unsnapPosition) rather than wherever the native
-      // drag happened to leave its top-left corner — every zone starts
-      // flush with the display's left edge, so that always put the
-      // restored window in the top-left corner regardless of which edge
-      // it was dragged away from.
-      resizeSnapTarget(snapTargetWindow, {
-        ...unsnapPosition(snapTargetWindow, snapFreeBounds),
-        width: snapFreeBounds.width,
-        height: snapFreeBounds.height,
-      });
-      snapIsSnapped = false;
-      snapFreeBounds = null;
-    }
-  }
-  snapPendingZone = null;
-  snapMoveStreak = 0;
-  snapActiveZoneType = null;
-  hideSnapPreview();
-}
-
-function setupWindowSnap(win) {
-  win.on("move", () => {
-    if (Date.now() < snapIgnoreMoveUntil) return;
-    snapMoveStreak += 1;
-    clearTimeout(snapMoveTimer);
-    snapMoveTimer = setTimeout(finishSnapDrag, SNAP_DRAG_END_MS);
-
-    if (snapMoveStreak < SNAP_ARM_MOVES) return;
-    snapTargetWindow = win;
-    // Polling for the real drag-end (see the SNAP_POLL_MS comment above)
-    // starts the moment a drag is confirmed armed, not on every 'move'
-    // event — setInterval is idempotent-guarded here so repeated arming
-    // checks while already polling don't stack up multiple intervals.
-    if (mouseState && !snapPollTimer) {
-      snapPollTimer = setInterval(() => {
-        if (!mouseState.isLeftButtonDown()) finishSnapDrag();
-      }, SNAP_POLL_MS);
-    }
-    const zone = getSnapZone(screen.getCursorScreenPoint());
-    snapPendingZone = zone;
-    const zoneType = zone?.type ?? null;
-    // Skip re-doing any of this while the cursor just sits inside the
-    // same zone it was already in last 'move' event — that's the common
-    // case (this fires on every pixel of movement during a drag) and
-    // redoing setBounds/show on an already-correct, already-visible
-    // window is exactly what was producing the flicker.
-    if (zoneType === snapActiveZoneType) return;
-    snapActiveZoneType = zoneType;
-    if (zone) {
-      showSnapPreview(zone);
-    } else {
-      requestHideSnapPreview();
-      // Tried restoring the pre-snap size right here, the instant the
-      // drag leaves the zone, instead of waiting for release — even as a
-      // single, one-shot, ignore-window-guarded setBounds call, it was
-      // intermittent (reliable on a fast drag, prone to leaving the drag
-      // stuck/desynced on a slow one). That's the signature of a real
-      // race, not a logic bug: Chromium's own app-region:drag apparently
-      // drives this frameless window's position through a different path
-      // than our setBounds() call, and the two were competing for
-      // authority over it mid-drag. Reverted — see finishSnapDrag's
-      // comment for why every other resize in this file waits for
-      // release, and this is no exception after all.
-    }
   });
 }
-
-function teardownWindowSnap() {
-  clearTimeout(snapMoveTimer);
-  clearInterval(snapPollTimer);
-  snapPollTimer = null;
-  clearTimeout(snapPreviewHideDebounceTimer);
-  snapPreviewHideDebounceTimer = null;
-  snapPreviewShown = false;
-  snapPendingZone = null;
-  snapMoveStreak = 0;
-  snapActiveZoneType = null;
-  snapTargetWindow = null;
-  snapIsSnapped = false;
-  snapFreeBounds = null;
-  snapIgnoreMoveUntil = 0;
-  if (snapPreviewWindow && !snapPreviewWindow.isDestroyed()) snapPreviewWindow.destroy();
-  snapPreviewWindow = null;
-}
-
-// Secondary drag-end signal, kept as a backstop for platforms/builds where
-// mouseState isn't available (see the comment above SNAP_POLL_MS) — a
-// renderer-reported mouseup, tested and confirmed to *not* actually fire
-// during a real title-bar drag on Windows (Chromium swallows it), but
-// still worth keeping for the ordinary case of clicking without dragging
-// far enough to arm, and as a fallback on other platforms. Only acts if a
-// drag was actually armed, so this is a harmless no-op the rest of the
-// time.
-ipcMain.on("disc:mouse-up", () => {
-  if (snapMoveStreak >= SNAP_ARM_MOVES) finishSnapDrag();
-});
-
-// Reported by the renderer whenever the active theme's accent color is
-// known/changes (see setSnapAccentColor in preload.cjs) — only it can
-// read the real computed CSS value. Reloading the already-created
-// preview window's content on the fly means a mid-session theme switch
-// doesn't need a restart to pick up the new color, same as most other
-// live-appliable theme changes in Disc.
-ipcMain.on("disc:set-snap-accent-color", (_event, hex) => {
-  const rgb = hexToRgbString(hex);
-  if (!rgb) return;
-  snapAccentRgb = rgb;
-  if (snapPreviewWindow && !snapPreviewWindow.isDestroyed()) {
-    snapPreviewWindow.loadURL(snapPreviewHtml());
-    // The fresh page starts back at "no zone shown" (opacity: 0, no
-    // class) regardless of whatever was tracked before the reload — keep
-    // that bookkeeping in sync so a zone right after a theme change is
-    // treated as newly appearing (fades in) rather than "already shown"
-    // (which would just reposition an invisible div with no fade at all).
-    snapPreviewShown = false;
-  }
-});
 
 // The losing instance already called app.quit() above — this just makes
 // sure it never gets as far as opening a second window in the meantime.
@@ -1040,66 +333,11 @@ app.on("window-all-closed", () => {
 // characters, collisions, case-sensitivity differences across
 // platforms) that a name-as-filename scheme would run into.
 
-// Toggle "always on top" — this is the lock button in the title bar.
+// Toggle "always on top" — the pin button in the bottom bar.
 ipcMain.handle("disc:toggle-always-on-top", (_event, shouldPin) => {
   if (!mainWindow) return false;
   mainWindow.setAlwaysOnTop(shouldPin, "floating");
   return mainWindow.isAlwaysOnTop();
-});
-
-// Window controls — needed because the window is frameless so Disc can
-// draw its own title bar (themed to match the active theme, rather than
-// leaving an unthemed native title bar + menu bar on top of it).
-ipcMain.on("disc:window-minimize", () => {
-  mainWindow?.minimize();
-});
-
-// "Maximize" deliberately never calls the real win.maximize() — it just
-// snaps to the full-work-area "top" zone via the exact same machinery a
-// drag-to-the-top-edge uses (snapIsSnapped/snapFreeBounds/
-// resizeSnapTarget/snapZoneBounds, all defined above), so this button is
-// really just "drag to the top edge and let go" triggered by a click
-// instead of a drag. That's not just for consistency: a genuinely
-// WS_MAXIMIZE'd frameless window turned out not to cooperate with this
-// app's custom app-region:drag dragging at all — a couple of earlier
-// attempts (see git history) to un-maximize a real OS-maximized window
-// right as a drag started kept racing the native move loop the same way
-// mid-drag setBounds calls always have in this file, sometimes leaving
-// the window stuck. Never actually entering real WS_MAXIMIZE sidesteps
-// that entirely, and reuses drag-to-zone logic that's already proven
-// solid — including, for free, restoring on drag-away exactly like any
-// other snap zone.
-ipcMain.handle("disc:window-toggle-maximize", () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  if (snapIsSnapped) {
-    // Same "un-snap" as dragging away from any snap zone (see
-    // finishSnapDrag), just triggered by the button instead of a drag —
-    // restore the pre-snap size, centered horizontally (see
-    // unsnapPosition).
-    const current = mainWindow.getBounds();
-    const size = {
-      width: snapFreeBounds?.width ?? current.width,
-      height: snapFreeBounds?.height ?? current.height,
-    };
-    resizeSnapTarget(mainWindow, { ...unsnapPosition(mainWindow, size), ...size });
-    snapIsSnapped = false;
-    snapFreeBounds = null;
-  } else {
-    snapFreeBounds = mainWindow.getBounds();
-    const display = screen.getDisplayMatching(snapFreeBounds);
-    resizeSnapTarget(mainWindow, snapZoneBounds({ type: "top", display }));
-    snapIsSnapped = true;
-  }
-  mainWindow.webContents.send("disc:window-maximized-changed", snapIsSnapped);
-  return snapIsSnapped;
-});
-
-ipcMain.handle("disc:window-is-maximized", () => {
-  return snapIsSnapped;
-});
-
-ipcMain.on("disc:window-close", () => {
-  mainWindow?.close();
 });
 
 // A native multi-select file picker for adding mp3s — a reliable

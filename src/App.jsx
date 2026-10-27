@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import TitleBar from "./components/TitleBar.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import LibraryPanel from "./components/LibraryPanel.jsx";
 import NowPlayingBar from "./components/NowPlayingBar.jsx";
 import { DiscContext } from "./context/DiscContext.jsx";
 import { toMediaUrl } from "./utils/paths.js";
-import { parseSelection } from "./utils/folderTree.js";
+import { parseSelection, moveKeys } from "./utils/folderTree.js";
 import "./App.css";
 
 const FOLDERS_KEY = "lite.folders";
@@ -164,18 +163,15 @@ export default function App() {
     setActiveFolderId((cur) => (gone.has(parseSelection(cur).folderId) ? "all" : cur));
   }, []);
 
-  // Drag-to-reorder from the sidebar: put `dragId` just before/after `targetId`.
-  const handleMoveFolder = useCallback((dragId, targetId, pos) => {
+  // Drag-to-reorder from the sidebar: put `ids` (one folder, or a whole
+  // multi-selection, keeping their relative order) just before/after
+  // `targetId`.
+  const handleMoveFolders = useCallback((ids, targetId, pos) => {
     setFolders((prev) => {
-      if (dragId === targetId) return prev;
-      const item = prev.find((f) => f.id === dragId);
-      if (!item) return prev;
-      const rest = prev.filter((f) => f.id !== dragId);
-      let to = rest.findIndex((f) => f.id === targetId);
-      if (to === -1) return prev;
-      if (pos === "after") to += 1;
-      rest.splice(to, 0, item);
-      return rest;
+      const order = moveKeys(prev.map((f) => f.id), ids, targetId, pos);
+      const byId = new Map(prev.map((f) => [f.id, f]));
+      const next = order.map((id) => byId.get(id));
+      return next.every((f, i) => f === prev[i]) ? prev : next;
     });
   }, []);
 
@@ -493,12 +489,6 @@ export default function App() {
     setPinned(Boolean(result));
   }, [pinned]);
 
-  // The window-snap preview (electron/main.js) tints itself with the
-  // theme's accent — Disc Lite's is always white.
-  useEffect(() => {
-    window.disc?.setSnapAccentColor("#ffffff");
-  }, []);
-
   const discContextValue = useMemo(
     () => ({
       folders,
@@ -512,7 +502,7 @@ export default function App() {
       onAddFolders: handleAddFolders,
       onRemoveFolders: handleRemoveFolders,
       onRenameFolder: handleRenameFolder,
-      onMoveFolder: handleMoveFolder,
+      onMoveFolders: handleMoveFolders,
       onDropFiles: handleDropFiles,
       onDeleteTrack: handleDeleteTrack,
       onRenameTrackFile: handleRenameTrackFile,
@@ -531,6 +521,8 @@ export default function App() {
       onPlayNext: handlePlayNext,
       onPlayPrev: handlePlayPrev,
       onToggleShuffle: handleToggleShuffle,
+      pinned,
+      onTogglePin: handleTogglePin,
     }),
     [
       folders,
@@ -543,7 +535,7 @@ export default function App() {
       handleAddFolders,
       handleRemoveFolders,
       handleRenameFolder,
-      handleMoveFolder,
+      handleMoveFolders,
       handleDropFiles,
       handleDeleteTrack,
       handleRenameTrackFile,
@@ -561,13 +553,14 @@ export default function App() {
       handlePlayNext,
       handlePlayPrev,
       handleToggleShuffle,
+      pinned,
+      handleTogglePin,
     ]
   );
 
   return (
     <DiscContext.Provider value={discContextValue}>
       <div className="app">
-        <TitleBar pinned={pinned} onTogglePin={handleTogglePin} />
         <div className="app__body">
           <Sidebar />
           <main className="app__main">

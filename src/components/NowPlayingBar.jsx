@@ -25,6 +25,8 @@ export default function NowPlayingBar() {
     onToggleShuffle,
     volume,
     setVolume,
+    pinned,
+    onTogglePin,
   } = useDisc();
 
   const progressRef = useRef(null);
@@ -89,6 +91,13 @@ export default function NowPlayingBar() {
           <Icon name="shuffle" size={15} />
         </button>
         <VolumeControl volume={volume} onChange={setVolume} />
+        <button
+          className={"now-playing__pin" + (pinned ? " now-playing__pin--active" : "")}
+          onClick={onTogglePin}
+          title={pinned ? "Unpin from top" : "Keep Disc on top of other windows"}
+        >
+          <Icon name={pinned ? "lockClosed" : "lockOpen"} size={14} />
+        </button>
       </div>
     </div>
   );

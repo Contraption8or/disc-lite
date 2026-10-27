@@ -91,3 +91,27 @@
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* Pin-on-top toggle (a regular window has no title-bar spot for it). */
+.now-playing__pin {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.now-playing__pin:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.now-playing__pin--active {
+  color: var(--accent);
+}

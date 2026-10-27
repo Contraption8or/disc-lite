@@ -53,3 +53,29 @@ export function buildTree(tracks) {
       .sort(byName);
   return finish(root);
 }
+
+// Moves `keys` (keeping their relative order) to sit just before/after
+// `targetKey` within `list`. Used for both the top-level folder order and
+// a subfolder's custom order among its siblings.
+export function moveKeys(list, keys, targetKey, pos) {
+  const moving = list.filter((k) => keys.includes(k));
+  const rest = list.filter((k) => !keys.includes(k));
+  let to = rest.indexOf(targetKey);
+  if (to === -1 || moving.length === 0) return list;
+  if (pos === "after") to += 1;
+  rest.splice(to, 0, ...moving);
+  return rest;
+}
+
+// Sorts tree nodes by a saved custom order (a list of rel paths); anything
+// not in it keeps its alphabetical position after the listed ones.
+export function applyOrder(nodes, order) {
+  if (!order || order.length === 0) return nodes;
+  const idx = new Map(order.map((rel, i) => [rel, i]));
+  const at = (n) => (idx.has(n.rel) ? idx.get(n.rel) : Infinity);
+  return [...nodes].sort((a, b) => {
+    const ai = at(a);
+    const bi = at(b);
+    return ai === bi ? 0 : ai - bi;
+  });
+}
