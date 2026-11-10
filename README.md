@@ -23,7 +23,9 @@ quarter of a second, and a fraction of the Electron version's memory.
   it out onto Premiere's timeline** (or Explorer, a DAW, ...), heart to
   favorite, right-click for Rename / Copy File Path / Reveal in Explorer /
   Remove from Disc (hides it; the file stays put, `Ctrl+Z` brings it back) /
-  Delete (to the Recycle Bin).
+  Delete (to the Recycle Bin). Removed tracks are listed under *Removed* in
+  the sidebar, with Restore per track or *Restore all*. Shift+click a play
+  button to start the song from the beginning.
 - **Play** whatever's shown, with a bottom bar (prev, play, next, loop,
   shuffle, volume, pin on top). Play follows the Shuffle toggle; with it on,
   the queue reshuffles and keeps going at the end. Loop repeats the current

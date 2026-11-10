@@ -184,6 +184,16 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         app.set_active("favorites");
         app.sb.selected.clear();
     }
+    // Only there once something has been removed from Disc.
+    let removed = app.removed_tracks.len();
+    if removed > 0
+        && nav_row(ui, "removed", "Removed", removed, app.active == "removed", |p, c, col| icons::eye_off(p, c, 15.0, col))
+            .on_hover_text("Tracks you removed from Disc. Their files are still on disk.")
+            .clicked()
+    {
+        app.set_active("removed");
+        app.sb.selected.clear();
+    }
 
     ui.add_space(14.0);
     // Section heading with the add button.
@@ -570,7 +580,7 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                         app.sb.selected = [key.clone()].into();
                     }
                 } else if ctrl {
-                    if app.sb.selected.is_empty() && !matches!(app.active.as_str(), "all" | "favorites") {
+                    if app.sb.selected.is_empty() && !matches!(app.active.as_str(), "all" | "favorites" | "removed") {
                         app.sb.selected.insert(app.active.clone());
                     }
                     if !app.sb.selected.remove(&key) {
@@ -616,7 +626,7 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         });
         if del {
             let mut keys: Vec<String> = app.sb.selected.iter().cloned().collect();
-            if keys.is_empty() && !matches!(app.active.as_str(), "all" | "favorites") {
+            if keys.is_empty() && !matches!(app.active.as_str(), "all" | "favorites" | "removed") {
                 keys.push(app.active.clone());
             }
             let ids = removable(app, &keys);

@@ -13,6 +13,12 @@ use crate::waveform::Waveforms;
 use crate::widgets::{Confirm, ConfirmResult};
 use crate::{migrate, theme};
 
+/// One step of Remove-from-Disc history, for Ctrl+Z.
+pub enum HiddenChange {
+    Removed(Vec<String>),
+    Restored(Vec<String>),
+}
+
 /// What a pending confirmation will do if accepted.
 pub enum PendingConfirm {
     RemoveFolders(Vec<String>),
@@ -43,17 +49,18 @@ pub struct DiscApp {
     pub favorites: HashSet<String>,
     /// Tracks removed from Disc (not from disk), and the undo history for that.
     pub hidden: HashSet<String>,
-    undo_hidden: Vec<Vec<String>>,
+    undo_hidden: Vec<HiddenChange>,
 
     pub folder_tracks: HashMap<String, Vec<TrackRef>>,
     pub missing: HashSet<String>,
     pub model: Model,
     model_dirty: bool,
     pub all_tracks: Vec<TrackRef>,
+    pub removed_tracks: Vec<TrackRef>,
     pub view: Vec<TrackRef>,
     view_dirty: bool,
 
-    /// "all" | "favorites" | a tree node key
+    /// "all" | "favorites" | "removed" | a tree node key
     pub active: String,
     pub search: String,
     pub search_focus_requested: bool,
@@ -125,6 +132,7 @@ impl DiscApp {
             model: Model::default(),
             model_dirty: true,
             all_tracks: Vec::new(),
+            removed_tracks: Vec::new(),
             view: Vec::new(),
             view_dirty: true,
             active: "all".into(),
@@ -254,8 +262,22 @@ impl DiscApp {
                     }
                 }
             }
+            // Removed-from-Disc tracks, in folder order (for the Removed view).
+            self.removed_tracks.clear();
+            if !self.hidden.is_empty() {
+                for f in &self.settings.folders {
+                    for t in self.folder_tracks.get(&f.id).into_iter().flatten() {
+                        if self.hidden.contains(&t.id) {
+                            self.removed_tracks.push(t.clone());
+                        }
+                    }
+                }
+            }
+            if self.active == "removed" && self.removed_tracks.is_empty() {
+                self.active = "all".into();
+            }
             // The view's folder may have just disappeared.
-            if !matches!(self.active.as_str(), "all" | "favorites") && !self.model.nodes.contains_key(&self.active) {
+            if !matches!(self.active.as_str(), "all" | "favorites" | "removed") && !self.model.nodes.contains_key(&self.active) {
                 let folder_id = parse_selection(&self.active).0.to_string();
                 if !self.settings.folders.iter().any(|f| f.id == folder_id) {
                     self.active = "all".into();
@@ -271,6 +293,8 @@ impl DiscApp {
                 self.all_tracks.iter().filter(|t| t.file_name.to_lowercase().contains(&q)).cloned().collect()
             } else if self.active == "favorites" {
                 self.all_tracks.iter().filter(|t| self.favorites.contains(&t.id)).cloned().collect()
+            } else if self.active == "removed" {
+                self.removed_tracks.clone()
             } else if self.active == "all" {
                 self.all_tracks.clone()
             } else {
@@ -280,7 +304,7 @@ impl DiscApp {
     }
 
     pub fn track_by_id(&self, id: &str) -> Option<TrackRef> {
-        self.all_tracks.iter().find(|t| t.id == id).cloned()
+        self.all_tracks.iter().chain(&self.removed_tracks).find(|t| t.id == id).cloned()
     }
 
     pub fn is_missing(&self, t: &TrackRef) -> bool {
@@ -289,7 +313,7 @@ impl DiscApp {
 
     /// The real directory a view points at (for importing/dropping files).
     pub fn active_dir(&self) -> Option<(PathBuf, String)> {
-        if matches!(self.active.as_str(), "all" | "favorites") {
+        if matches!(self.active.as_str(), "all" | "favorites" | "removed") {
             return None;
         }
         let (folder_id, sub) = parse_selection(&self.active);
@@ -454,28 +478,55 @@ impl DiscApp {
         if !self.hidden.insert(track.id.clone()) {
             return;
         }
-        self.undo_hidden.push(vec![track.id.clone()]);
-        self.mark_settings_dirty();
-        self.model_dirty = true;
+        self.undo_hidden.push(HiddenChange::Removed(vec![track.id.clone()]));
+        self.hidden_changed();
         self.show_toast(format!("Removed \"{}\" from Disc  ·  Ctrl+Z to undo", track.stem));
     }
 
-    /// Brings back the most recently removed track(s).
-    pub fn undo_remove(&mut self) {
-        let Some(ids) = self.undo_hidden.pop() else { return };
-        for id in &ids {
-            self.hidden.remove(id);
+    /// Puts removed tracks back in the library (Ctrl+Z undoes this too).
+    pub fn restore_tracks(&mut self, ids: Vec<String>) {
+        let ids: Vec<String> = ids.into_iter().filter(|id| self.hidden.remove(id)).collect();
+        if ids.is_empty() {
+            return;
         }
+        let msg = if ids.len() == 1 {
+            format!("Restored \"{}\"  ·  Ctrl+Z to undo", self.track_name(&ids[0]))
+        } else {
+            format!("Restored {} tracks  ·  Ctrl+Z to undo", ids.len())
+        };
+        self.undo_hidden.push(HiddenChange::Restored(ids));
+        self.hidden_changed();
+        self.show_toast(msg);
+    }
+
+    /// Ctrl+Z: reverses the most recent remove or restore.
+    pub fn undo_remove(&mut self) {
+        let Some(change) = self.undo_hidden.pop() else { return };
+        let msg = match change {
+            HiddenChange::Removed(ids) => {
+                for id in &ids {
+                    self.hidden.remove(id);
+                }
+                format!("Restored \"{}\"", self.track_name(&ids[0]))
+            }
+            HiddenChange::Restored(ids) => {
+                let n = ids.len();
+                let first = self.track_name(&ids[0]);
+                self.hidden.extend(ids);
+                if n == 1 { format!("Removed \"{first}\" again") } else { format!("Removed {n} tracks again") }
+            }
+        };
+        self.hidden_changed();
+        self.show_toast(msg);
+    }
+
+    fn hidden_changed(&mut self) {
         self.mark_settings_dirty();
         self.model_dirty = true;
-        let name = self
-            .folder_tracks
-            .values()
-            .flatten()
-            .find(|t| ids.contains(&t.id))
-            .map(|t| t.stem.clone())
-            .unwrap_or_else(|| "track".into());
-        self.show_toast(format!("Restored \"{name}\""));
+    }
+
+    fn track_name(&self, id: &str) -> String {
+        self.folder_tracks.values().flatten().find(|t| t.id == id).map(|t| t.stem.clone()).unwrap_or_else(|| "track".into())
     }
 
     pub fn toggle_favorite(&mut self, id: &str) {

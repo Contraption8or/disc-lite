@@ -74,7 +74,9 @@ pub fn show(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         }
         if enabled && play_resp.clicked() {
             if let Some(t) = app.current.clone() {
-                app.toggle_play(&t, false);
+                // Shift+click restarts the track from the beginning.
+                let restart = ui.input(|i| i.modifiers.shift);
+                app.toggle_play(&t, restart);
             }
         }
         x += 38.0;

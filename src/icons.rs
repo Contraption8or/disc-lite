@@ -239,3 +239,39 @@ pub fn palette(p: &Painter, c: Pos2, s: f32, col: Color32, hole: Color32) {
         p.circle_filled(pos2(c.x + r * dx, c.y + r * dy), s * 0.07, col);
     }
 }
+
+/// An eye with a slash through it: "hidden".
+pub fn eye_off(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    let (w, h) = (s * 0.46, s * 0.26);
+    let st = stroke(col, 1.3);
+    let top: Vec<Pos2> = (0..=12)
+        .map(|i| {
+            let t = i as f32 / 12.0;
+            pos2(c.x - w + 2.0 * w * t, c.y - h * (PI * t).sin())
+        })
+        .collect();
+    let bottom: Vec<Pos2> = top.iter().map(|q| pos2(q.x, 2.0 * c.y - q.y)).collect();
+    p.add(Shape::line(top, st));
+    p.add(Shape::line(bottom, st));
+    p.circle_stroke(c, s * 0.11, st);
+    p.line_segment([pos2(c.x - w * 0.8, c.y + s * 0.38), pos2(c.x + w * 0.8, c.y - s * 0.38)], stroke(col, 1.4));
+}
+
+/// A counter-clockwise arrow: "bring back".
+pub fn restore(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    let r = s * 0.32;
+    let st = stroke(col, 1.4);
+    // Arc from the top going counter-clockwise around to the right side.
+    let pts: Vec<Pos2> = (0..=20)
+        .map(|i| {
+            let a = -PI * 0.5 - (PI * 1.5) * i as f32 / 20.0;
+            pos2(c.x + r * a.cos(), c.y + r * a.sin())
+        })
+        .collect();
+    p.add(Shape::line(pts, st));
+    // Arrowhead at the start (top), pointing right.
+    let tip = pos2(c.x + s * 0.06, c.y - r);
+    let a = s * 0.14;
+    p.line_segment([pos2(tip.x - a, tip.y - a), tip], st);
+    p.line_segment([pos2(tip.x - a, tip.y + a), tip], st);
+}

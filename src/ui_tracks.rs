@@ -24,6 +24,7 @@ enum Action {
     CopyPath(TrackRef),
     Reveal(TrackRef),
     RemoveFromDisc(TrackRef),
+    Restore(String),
     AskDelete(TrackRef),
 }
 
@@ -34,6 +35,7 @@ fn view_title(app: &DiscApp) -> String {
     match app.active.as_str() {
         "all" => "All Music".into(),
         "favorites" => "Favorites".into(),
+        "removed" => "Removed from Disc".into(),
         k => app.model.nodes.get(k).map(|n| n.name.clone()).unwrap_or_else(|| "Folder".into()),
     }
 }
@@ -74,10 +76,21 @@ fn toolbar(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         let shuffle = app.settings.shuffle;
         app.play_all(shuffle);
     }
-    let import = widgets::button(&mut right, "Import", ButtonKind::Ghost, can_import, None);
-    let import = if can_import { import.on_hover_text("Copy audio files into this folder") } else { import.on_hover_text("Pick a folder on the left to import into it") };
-    if import.clicked() {
-        app.pick_and_import();
+    if app.active == "removed" {
+        // No importing into "Removed"; offer to bring everything back instead.
+        if widgets::button(&mut right, "Restore all", ButtonKind::Ghost, true, Some(&|p, c, col| icons::restore(p, c, 14.0, col)))
+            .on_hover_text("Put every removed track back in Disc (Ctrl+Z to undo)")
+            .clicked()
+        {
+            let ids = app.removed_tracks.iter().map(|t| t.id.clone()).collect();
+            app.restore_tracks(ids);
+        }
+    } else {
+        let import = widgets::button(&mut right, "Import", ButtonKind::Ghost, can_import, None);
+        let import = if can_import { import.on_hover_text("Copy audio files into this folder") } else { import.on_hover_text("Pick a folder on the left to import into it") };
+        if import.clicked() {
+            app.pick_and_import();
+        }
     }
     right.add_space(6.0);
 
@@ -186,7 +199,12 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                 }
             }
             if can_play && presp.clicked() {
-                actions.push(Action::Toggle(t.clone()));
+                // Shift+click: always start from the beginning.
+                if ui.input(|i| i.modifiers.shift) {
+                    actions.push(Action::PlayFromStart(t.clone()));
+                } else {
+                    actions.push(Action::Toggle(t.clone()));
+                }
             }
 
             // Layout: [play] [name / meta] [waveform] [duration] [heart]
@@ -286,6 +304,19 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                 let _ = wresp;
             }
 
+            // In the Removed view the heart becomes a Restore button.
+            if app.active == "removed" {
+                let rrect = Rect::from_center_size(heart_c, vec2(28.0, 28.0));
+                let rresp = ui.interact(rrect, Id::new(("track-restore", &t.id)), Sense::click());
+                crate::widgets::hand(&rresp, true);
+                if rresp.hovered() {
+                    ui.painter().circle_filled(heart_c, 14.0, theme::BG_HOVER());
+                }
+                icons::restore(ui.painter(), heart_c, 16.0, if rresp.hovered() { theme::TEXT() } else { theme::TEXT2() });
+                if rresp.on_hover_text("Restore to Disc").clicked() {
+                    actions.push(Action::Restore(t.id.clone()));
+                }
+            } else {
             // Favorite.
             let fav = app.favorites.contains(&t.id);
             let hrect = Rect::from_center_size(heart_c, vec2(28.0, 28.0));
@@ -298,11 +329,13 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
             if hresp.on_hover_text(if fav { "Remove from Favorites" } else { "Add to Favorites" }).clicked() {
                 actions.push(Action::Favorite(t.id.clone()));
             }
+            }
 
             if row_resp.double_clicked() && can_play {
                 actions.push(Action::PlayFromStart(t.clone()));
             }
             let tc = t.clone();
+            let removed_view = app.active == "removed";
             crate::widgets::context_menu(&row_resp, |ui| {
                 ui.set_min_width(180.0);
                 if ui.button("Rename").clicked() {
@@ -318,7 +351,12 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Remove from Disc").on_hover_text("Hide it from Disc. The file stays on disk. Ctrl+Z to undo.").clicked() {
+                if removed_view {
+                    if ui.button("Restore to Disc").clicked() {
+                        actions.push(Action::Restore(tc.id.clone()));
+                        ui.close();
+                    }
+                } else if ui.button("Remove from Disc").on_hover_text("Hide it from Disc. The file stays on disk. Ctrl+Z to undo.").clicked() {
                     actions.push(Action::RemoveFromDisc(tc.clone()));
                     ui.close();
                 }
@@ -366,6 +404,7 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
             }
             Action::Reveal(t) => crate::library::reveal_in_explorer(&t.path),
             Action::RemoveFromDisc(t) => app.remove_track_from_disc(&t),
+            Action::Restore(id) => app.restore_tracks(vec![id]),
             Action::AskDelete(t) => {
                 app.confirm = Some((
                     Confirm {
@@ -414,7 +453,7 @@ fn start_queue_at(app: &mut DiscApp, t: &TrackRef) {
 fn location(app: &DiscApp, t: &TrackRef) -> Option<String> {
     let folder_name = app.settings.folders.iter().find(|f| f.id == t.folder_id).map(|f| f.name.as_str()).unwrap_or("");
     let full = if t.rel_dir.is_empty() { folder_name.to_string() } else { format!("{folder_name} / {}", t.rel_dir.replace('/', " / ")) };
-    if !app.search.trim().is_empty() || matches!(app.active.as_str(), "all" | "favorites") {
+    if !app.search.trim().is_empty() || matches!(app.active.as_str(), "all" | "favorites" | "removed") {
         return Some(full);
     }
     let (fid, rel) = crate::tree::parse_selection(&app.active);
