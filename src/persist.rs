@@ -19,6 +19,8 @@ fn default_theme() -> String {
 pub struct Settings {
     pub folders: Vec<Folder>,
     pub favorites: Vec<String>,
+    /// Tracks removed from Disc (by path). The files themselves are untouched.
+    pub hidden: Vec<String>,
     #[serde(default = "default_volume")]
     pub volume: f32,
     pub shuffle: bool,
@@ -37,6 +39,7 @@ impl Default for Settings {
         Self {
             folders: Vec::new(),
             favorites: Vec::new(),
+            hidden: Vec::new(),
             volume: default_volume(),
             shuffle: false,
             loop_one: false,

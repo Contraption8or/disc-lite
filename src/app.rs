@@ -41,6 +41,9 @@ pub struct DiscApp {
     pub settings: Settings,
     pub expanded: HashSet<String>,
     pub favorites: HashSet<String>,
+    /// Tracks removed from Disc (not from disk), and the undo history for that.
+    pub hidden: HashSet<String>,
+    undo_hidden: Vec<Vec<String>>,
 
     pub folder_tracks: HashMap<String, Vec<TrackRef>>,
     pub missing: HashSet<String>,
@@ -114,6 +117,8 @@ impl DiscApp {
         let mut app = Self {
             expanded: settings.expanded.iter().cloned().collect(),
             favorites: settings.favorites.iter().cloned().collect(),
+            hidden: settings.hidden.iter().cloned().collect(),
+            undo_hidden: Vec::new(),
             settings,
             folder_tracks: HashMap::new(),
             missing: HashSet::new(),
@@ -167,6 +172,7 @@ impl DiscApp {
     pub fn mark_settings_dirty(&mut self) {
         self.settings.expanded = self.expanded.iter().cloned().collect();
         self.settings.favorites = self.favorites.iter().cloned().collect();
+        self.settings.hidden = { let mut h: Vec<String> = self.hidden.iter().cloned().collect(); h.sort(); h };
         self.settings_dirty_at = Some(Instant::now());
     }
 
@@ -221,16 +227,28 @@ impl DiscApp {
     fn rebuild_if_needed(&mut self) {
         if self.model_dirty {
             self.model_dirty = false;
+            // Removed-from-Disc tracks are filtered out before anything sees them.
+            let filtered: HashMap<String, Vec<TrackRef>>;
+            let tracks = if self.hidden.is_empty() {
+                &self.folder_tracks
+            } else {
+                filtered = self
+                    .folder_tracks
+                    .iter()
+                    .map(|(id, ts)| (id.clone(), ts.iter().filter(|t| !self.hidden.contains(&t.id)).cloned().collect()))
+                    .collect();
+                &filtered
+            };
             self.model = tree::build_model(
                 &self.settings.folders,
-                &self.folder_tracks,
+                tracks,
                 &self.settings.placement,
                 &self.settings.order,
             );
             let mut seen = HashSet::new();
             self.all_tracks.clear();
             for f in &self.settings.folders {
-                for t in self.folder_tracks.get(&f.id).into_iter().flatten() {
+                for t in tracks.get(&f.id).into_iter().flatten() {
                     if seen.insert(t.id.clone()) {
                         self.all_tracks.push(t.clone());
                     }
@@ -431,6 +449,35 @@ impl DiscApp {
         }
     }
 
+    /// Hides a track from Disc. The file stays where it is; Ctrl+Z undoes it.
+    pub fn remove_track_from_disc(&mut self, track: &TrackRef) {
+        if !self.hidden.insert(track.id.clone()) {
+            return;
+        }
+        self.undo_hidden.push(vec![track.id.clone()]);
+        self.mark_settings_dirty();
+        self.model_dirty = true;
+        self.show_toast(format!("Removed \"{}\" from Disc  ·  Ctrl+Z to undo", track.stem));
+    }
+
+    /// Brings back the most recently removed track(s).
+    pub fn undo_remove(&mut self) {
+        let Some(ids) = self.undo_hidden.pop() else { return };
+        for id in &ids {
+            self.hidden.remove(id);
+        }
+        self.mark_settings_dirty();
+        self.model_dirty = true;
+        let name = self
+            .folder_tracks
+            .values()
+            .flatten()
+            .find(|t| ids.contains(&t.id))
+            .map(|t| t.stem.clone())
+            .unwrap_or_else(|| "track".into());
+        self.show_toast(format!("Restored \"{name}\""));
+    }
+
     pub fn toggle_favorite(&mut self, id: &str) {
         if !self.favorites.remove(id) {
             self.favorites.insert(id.to_string());
@@ -623,6 +670,11 @@ impl DiscApp {
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
         let typing = ctx.egui_wants_keyboard_input();
+        // Ctrl+Z: undo the last "Remove from Disc" (text boxes keep their own undo).
+        let undo = ctx.input(|i| !typing && i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z));
+        if undo {
+            self.undo_remove();
+        }
         let l_key = ctx.input(|i| !typing && !i.modifiers.command && i.key_pressed(egui::Key::L));
         if l_key {
             self.toggle_loop();
@@ -764,6 +816,7 @@ impl DiscApp {
 impl eframe::App for DiscApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        crate::widgets::track_context_menu_clicks(&ctx);
         self.drain_scans();
         self.rebuild_if_needed();
         self.tick_playback();
@@ -810,6 +863,7 @@ impl eframe::App for DiscApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.settings.expanded = self.expanded.iter().cloned().collect();
         self.settings.favorites = self.favorites.iter().cloned().collect();
+        self.settings.hidden = { let mut h: Vec<String> = self.hidden.iter().cloned().collect(); h.sort(); h };
         persist::save(&self.settings);
         self.waves.save_cache();
         // Everything is saved; hand over to the freshly installed version.

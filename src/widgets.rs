@@ -159,3 +159,31 @@ pub fn hand(resp: &Response, enabled: bool) {
         resp.ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 }
+
+const SUPPRESS_MENU: &str = "suppress-context-menu";
+
+/// Call once at the start of each frame (clears the note left by
+/// [`context_menu`] once the right button is up again).
+pub fn track_context_menu_clicks(ctx: &egui::Context) {
+    let busy = ctx.input(|i| i.pointer.secondary_down() || i.pointer.button_released(egui::PointerButton::Secondary));
+    if !busy {
+        ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new(SUPPRESS_MENU)));
+    }
+}
+
+/// `resp.context_menu(...)`, except right-clicking a row whose menu is
+/// already open just closes it. (Plain egui closes the menu on the press
+/// and reopens it on the release, so it flickers.) Right-clicking a
+/// different row still opens that row's menu.
+pub fn context_menu(resp: &Response, add_contents: impl FnOnce(&mut Ui)) {
+    let id = egui::Id::new(SUPPRESS_MENU);
+    let pressed_here = resp.hovered()
+        && resp.ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary));
+    if pressed_here && resp.context_menu_opened() {
+        resp.ctx.data_mut(|d| d.insert_temp(id, resp.id));
+    }
+    let suppressed = resp.secondary_clicked() && resp.ctx.data(|d| d.get_temp::<egui::Id>(id)) == Some(resp.id);
+    if !suppressed {
+        resp.context_menu(add_contents);
+    }
+}

@@ -392,7 +392,7 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
 
             let key = row.key.clone();
             let kind = row.kind;
-            resp.context_menu(|ui| {
+            crate::widgets::context_menu(&resp, |ui| {
                 ui.set_min_width(170.0);
                 if kind == NodeKind::Folder && ui.button("Rename").clicked() {
                     actions.push(Action::StartRename(key.clone()));

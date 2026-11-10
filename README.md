@@ -22,6 +22,7 @@ quarter of a second, and a fraction of the Electron version's memory.
 - **Track list** with a waveform per row. Click the waveform to seek, **drag
   it out onto Premiere's timeline** (or Explorer, a DAW, ...), heart to
   favorite, right-click for Rename / Copy File Path / Reveal in Explorer /
+  Remove from Disc (hides it; the file stays put, `Ctrl+Z` brings it back) /
   Delete (to the Recycle Bin).
 - **Play** whatever's shown, with a bottom bar (prev, play, next, loop,
   shuffle, volume, pin on top). Play follows the Shuffle toggle; with it on,
@@ -29,7 +30,7 @@ quarter of a second, and a fraction of the Electron version's memory.
   track.
 - **Search** across all music. Drop audio files onto the window (or use
   *Import*) to copy them into the folder you're viewing.
-- Keys: `Space` play/pause · `←`/`→` seek 5s · `↑`/`↓` volume · `S` shuffle · `L` loop ·
+- Keys: `Space` play/pause · `←`/`→` seek 5s · `↑`/`↓` volume · `S` shuffle · `L` loop · `Ctrl+Z` undo remove ·
   `Ctrl+F` or `/` search · in the folder column: `Delete` remove selected,
   `Ctrl+A` select all, `Esc` clear selection.
 

@@ -23,6 +23,7 @@ enum Action {
     StartRename(TrackRef),
     CopyPath(TrackRef),
     Reveal(TrackRef),
+    RemoveFromDisc(TrackRef),
     AskDelete(TrackRef),
 }
 
@@ -302,7 +303,7 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                 actions.push(Action::PlayFromStart(t.clone()));
             }
             let tc = t.clone();
-            row_resp.context_menu(|ui| {
+            crate::widgets::context_menu(&row_resp, |ui| {
                 ui.set_min_width(180.0);
                 if ui.button("Rename").clicked() {
                     actions.push(Action::StartRename(tc.clone()));
@@ -317,6 +318,10 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                     ui.close();
                 }
                 ui.separator();
+                if ui.button("Remove from Disc").on_hover_text("Hide it from Disc. The file stays on disk. Ctrl+Z to undo.").clicked() {
+                    actions.push(Action::RemoveFromDisc(tc.clone()));
+                    ui.close();
+                }
                 if ui.button(egui::RichText::new("Delete Song…").color(theme::DANGER())).clicked() {
                     actions.push(Action::AskDelete(tc.clone()));
                     ui.close();
@@ -360,6 +365,7 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                 app.show_toast("Copied file path");
             }
             Action::Reveal(t) => crate::library::reveal_in_explorer(&t.path),
+            Action::RemoveFromDisc(t) => app.remove_track_from_disc(&t),
             Action::AskDelete(t) => {
                 app.confirm = Some((
                     Confirm {
