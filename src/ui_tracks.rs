@@ -66,16 +66,8 @@ fn toolbar(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     );
     right.spacing_mut().item_spacing = vec2(8.0, 0.0);
     let can_import = app.active_dir().is_some();
-    if widgets::button(&mut right, "Shuffle", ButtonKind::Ghost, playable > 0, Some(&|p, c, col| icons::shuffle(p, c, 14.0, col)))
-        .on_hover_text("Shuffle everything in this list")
-        .clicked()
-    {
-        if !app.settings.shuffle {
-            app.toggle_shuffle();
-        }
-        app.play_all(true);
-    }
     if widgets::button(&mut right, "Play", ButtonKind::Primary, playable > 0, Some(&|p, c, col| icons::play(p, c, 11.0, col)))
+        .on_hover_text(if app.settings.shuffle { "Play this list, shuffled (Shuffle is on)" } else { "Play this list in order" })
         .clicked()
     {
         let shuffle = app.settings.shuffle;

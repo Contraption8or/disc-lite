@@ -23,14 +23,20 @@ quarter of a second, and a fraction of the Electron version's memory.
   it out onto Premiere's timeline** (or Explorer, a DAW, ...), heart to
   favorite, right-click for Rename / Copy File Path / Reveal in Explorer /
   Delete (to the Recycle Bin).
-- **Play / Shuffle** over whatever's shown, with a bottom bar (prev, play,
-  next, shuffle, volume, pin on top). Shuffle reshuffles and keeps going at
-  the end.
+- **Play** whatever's shown, with a bottom bar (prev, play, next, loop,
+  shuffle, volume, pin on top). Play follows the Shuffle toggle; with it on,
+  the queue reshuffles and keeps going at the end. Loop repeats the current
+  track.
 - **Search** across all music. Drop audio files onto the window (or use
   *Import*) to copy them into the folder you're viewing.
-- Keys: `Space` play/pause · `←`/`→` seek 5s · `↑`/`↓` volume · `S` shuffle ·
+- Keys: `Space` play/pause · `←`/`→` seek 5s · `↑`/`↓` volume · `S` shuffle · `L` loop ·
   `Ctrl+F` or `/` search · in the folder column: `Delete` remove selected,
   `Ctrl+A` select all, `Esc` clear selection.
+
+**Check for updates** sits at the bottom of the folder column. If a newer
+release is on GitHub it becomes *Update to X*: one click downloads it,
+swaps it in for the running exe, and restarts Disc Lite (if the exe's folder
+isn't writable, it opens the download page instead).
 
 On first launch it imports folders, favorites, the folder arrangement,
 volume, and shuffle from the old Electron Disc Lite (read-only — the old app's
@@ -62,5 +68,6 @@ run against a throwaway profile instead.
 - `src/waveform.rs` — background waveform decoding + disk cache
 - `src/audio.rs` — playback (rodio); `src/dragout.rs` — native drag-out
 - `src/migrate.rs` — one-time import from the Electron version
+- `src/update.rs` — "Check for updates" and the in-place exe swap
 - `src/theme.rs`, `src/icons.rs`, `src/widgets.rs` — palette, painted
   icons, shared widgets

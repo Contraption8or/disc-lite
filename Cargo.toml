@@ -1,7 +1,7 @@
 [package]
 description = "A stripped-down, black-and-white music library for video editors: folders, waveforms, drag-to-Premiere."
 name = "disc-lite"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2024"
 
 [dependencies]
@@ -18,6 +18,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 symphonia = { version = "0.5.5", features = ["all"] }
 trash = "5.3.0"
+ureq = "3"
 walkdir = "2.5.0"
 
 [build-dependencies]

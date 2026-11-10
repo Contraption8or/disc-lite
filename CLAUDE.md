@@ -30,3 +30,8 @@ There is no test suite.
   on disk.
 - The eframe `wgpu` default renderer doubled memory use; it's `glow` on
   purpose.
+- Updates (`update.rs`) read GitHub's latest disc-lite release and pick
+  its first `.exe` asset, so every release must attach the exe. Version
+  comes from `Cargo.toml` — bump it before building a release. The swap
+  renames the running exe to `.old` (Windows allows renaming, not
+  overwriting) and the next launch deletes it.

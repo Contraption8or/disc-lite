@@ -208,3 +208,21 @@ pub fn video(p: &Painter, c: Pos2, s: f32, col: Color32) {
         Stroke::NONE,
     ));
 }
+
+/// Repeat arrows (a loop), with a small "1" inside for repeat-one.
+pub fn repeat_one(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    let (w, h) = (s * 0.46, s * 0.34);
+    let st = stroke(col, 1.4);
+    let a = s * 0.13;
+    // Top run, left side going up, arrow pointing right.
+    let tip = pos2(c.x + w * 0.7, c.y - h);
+    p.add(Shape::line(vec![pos2(c.x - w, c.y + h * 0.15), pos2(c.x - w, c.y - h), tip], st));
+    p.line_segment([pos2(tip.x - a, tip.y - a), tip], st);
+    p.line_segment([pos2(tip.x - a, tip.y + a), tip], st);
+    // Bottom run, right side going down, arrow pointing left.
+    let tip = pos2(c.x - w * 0.7, c.y + h);
+    p.add(Shape::line(vec![pos2(c.x + w, c.y - h * 0.15), pos2(c.x + w, c.y + h), tip], st));
+    p.line_segment([pos2(tip.x + a, tip.y - a), tip], st);
+    p.line_segment([pos2(tip.x + a, tip.y + a), tip], st);
+    p.text(c, eframe::egui::Align2::CENTER_CENTER, "1", crate::theme::font_semibold(s * 0.62), col);
+}

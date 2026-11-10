@@ -15,6 +15,7 @@ mod tree;
 mod ui_player;
 mod ui_sidebar;
 mod ui_tracks;
+mod update;
 mod waveform;
 mod widgets;
 

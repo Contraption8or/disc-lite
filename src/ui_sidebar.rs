@@ -134,6 +134,7 @@ fn target_valid(app: &DiscApp, keys: &[String], target: &DropTarget) -> bool {
 pub fn show(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     let frame = egui::Frame::new().fill(theme::BG_PANEL).inner_margin(egui::Margin::symmetric(8, 10));
     let panel = egui::Panel::left("sidebar").exact_size(WIDTH).resizable(false).frame(frame).show(ui, |ui| {
+        footer(app, ui, ctx);
         sidebar_body(app, ui, ctx);
     });
     let rect = panel.response.rect;
@@ -658,4 +659,68 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
             }
         }
     }
+}
+
+/// Bottom of the column: the version, and "Check for updates".
+fn footer(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
+    use crate::update::{Status, VERSION};
+    let frame = egui::Frame::new().fill(theme::BG_PANEL);
+    egui::Panel::bottom("sidebar-footer").exact_size(30.0).resizable(false).frame(frame).show(ui, |ui| {
+        let r = ui.max_rect();
+        let p = ui.painter();
+        p.line_segment([pos2(r.left(), r.top()), pos2(r.right(), r.top())], Stroke::new(1.0, theme::GUIDE));
+        p.text(
+            pos2(r.left() + 8.0, r.center().y + 2.0),
+            Align2::LEFT_CENTER,
+            format!("Disc Lite {VERSION}"),
+            theme::font(11.5),
+            theme::TEXT3,
+        );
+
+        let status = app.updater.status();
+        let (label, clickable, highlight) = match &status {
+            Status::Idle | Status::Failed(_) => ("Check for updates".to_string(), true, false),
+            Status::Checking => ("Checking…".to_string(), false, false),
+            Status::UpToDate => ("Up to date ✓".to_string(), true, false),
+            Status::Available(rel) => (format!("Update to {}", rel.version), true, true),
+            Status::Downloading(v) => (format!("Downloading {v}…"), false, false),
+            Status::Ready(_) => ("Restarting…".to_string(), false, false),
+        };
+        let font = theme::font_semibold(11.5);
+        let w = p.layout_no_wrap(label.clone(), font.clone(), theme::TEXT).size().x + 16.0;
+        let br = Rect::from_min_max(pos2(r.right() - 2.0 - w, r.top() + 5.0), pos2(r.right() - 2.0, r.bottom() - 1.0));
+        let resp = ui.interact(br, Id::new("check-updates"), if clickable { Sense::click() } else { Sense::hover() });
+        crate::widgets::hand(&resp, clickable);
+        let p = ui.painter();
+        if highlight {
+            p.rect_filled(br, 6.0, if resp.hovered() { theme::ACCENT_HOVER } else { theme::ACCENT });
+        } else if clickable && resp.hovered() {
+            p.rect_filled(br, 6.0, theme::BG_HOVER);
+        }
+        let col = if highlight {
+            theme::ACCENT_TEXT
+        } else if clickable && resp.hovered() {
+            theme::TEXT
+        } else {
+            theme::TEXT2
+        };
+        p.text(br.center(), Align2::CENTER_CENTER, label, font, col);
+        if resp.clicked() {
+            match status {
+                Status::Available(rel) => {
+                    app.confirm = Some((
+                        Confirm {
+                            title: format!("Update to Disc Lite {}?", rel.version),
+                            message: format!(
+                                "You have {VERSION}. Disc Lite will download the new version, then close and reopen itself. Your folders and settings stay as they are."
+                            ),
+                            confirm_label: "Update".into(),
+                        },
+                        PendingConfirm::Update(rel),
+                    ));
+                }
+                _ => app.updater.check(ctx),
+            }
+        }
+    });
 }

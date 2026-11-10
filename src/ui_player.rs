@@ -132,18 +132,26 @@ pub fn show(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         rx -= 34.0;
 
         let shuffle_on = app.settings.shuffle;
-        let sh_r = Rect::from_center_size(pos2(rx - 14.0, cy), vec2(28.0, 28.0));
-        let sh = round_button(ui, sh_r, "shuffle", true, |p, c, col| {
-            icons::shuffle(p, c, 16.0, if shuffle_on { theme::TEXT } else { col })
-        })
-        .on_hover_text(if shuffle_on { "Shuffle is on (S)" } else { "Shuffle is off (S)" });
-        if shuffle_on {
-            p.circle_filled(pos2(sh_r.center().x, sh_r.bottom() + 1.0), 1.5, theme::TEXT);
-        }
-        if sh.clicked() {
+        let sh_r = Rect::from_center_size(pos2(rx - 15.0, cy), vec2(30.0, 30.0));
+        let tip = if shuffle_on { "Shuffle: ON — click to turn off (S)" } else { "Shuffle: OFF — click to turn on (S)" };
+        if toggle_button(ui, sh_r, "shuffle", shuffle_on, |p, c, col| icons::shuffle(p, c, 16.0, col))
+            .on_hover_text(tip)
+            .clicked()
+        {
             app.toggle_shuffle();
         }
-        rx -= 40.0;
+        rx -= 36.0;
+
+        let loop_on = app.settings.loop_one;
+        let lp_r = Rect::from_center_size(pos2(rx - 15.0, cy), vec2(30.0, 30.0));
+        let tip = if loop_on { "Loop: ON — repeating this track (L)" } else { "Loop: OFF — click to repeat this track (L)" };
+        if toggle_button(ui, lp_r, "loop", loop_on, |p, c, col| icons::repeat_one(p, c, 16.0, col))
+            .on_hover_text(tip)
+            .clicked()
+        {
+            app.toggle_loop();
+        }
+        rx -= 42.0;
 
         // Middle: what's playing.
         let text_w = (rx - x - 12.0).max(0.0);
@@ -191,5 +199,31 @@ fn round_button(
         theme::TEXT2
     };
     draw(p, r.center(), col);
+    resp
+}
+
+/// An on/off button. On: filled highlight, bright icon and a dot under it.
+/// Off: no fill and a dimmed icon, so the two states can't be confused.
+fn toggle_button(
+    ui: &mut egui::Ui,
+    r: Rect,
+    id: &str,
+    on: bool,
+    draw: impl FnOnce(&egui::Painter, egui::Pos2, egui::Color32),
+) -> egui::Response {
+    let resp = ui.interact(r, ui.id().with(id), Sense::click());
+    crate::widgets::hand(&resp, true);
+    let p = ui.painter();
+    let hovered = resp.hovered();
+    if on {
+        p.rect_filled(r, 8.0, if hovered { theme::BORDER } else { theme::BG_ACTIVE });
+        draw(p, r.center(), theme::TEXT);
+        p.circle_filled(pos2(r.center().x, r.bottom() + 3.0), 2.0, theme::TEXT);
+    } else {
+        if hovered {
+            p.rect_filled(r, 8.0, theme::BG_HOVER);
+        }
+        draw(p, r.center(), if hovered { theme::TEXT2 } else { theme::TEXT3.gamma_multiply(0.8) });
+    }
     resp
 }

@@ -17,6 +17,7 @@ use crate::{migrate, theme};
 pub enum PendingConfirm {
     RemoveFolders(Vec<String>),
     DeleteTrack(TrackRef),
+    Update(crate::update::Release),
 }
 
 /// Sidebar-only UI state.
@@ -77,6 +78,9 @@ pub struct DiscApp {
     /// After a native drag-out, the button release happened inside Windows'
     /// drag loop where egui couldn't see it; feed one in next frame.
     pub inject_release: bool,
+    pub updater: crate::update::Updater,
+    /// Set once an update is in place: started after we save and exit.
+    restart_into: Option<PathBuf>,
     rng: u64,
 }
 
@@ -138,6 +142,8 @@ impl DiscApp {
             last_cache_save: Instant::now(),
             ignore_drops_until: Instant::now(),
             inject_release: false,
+            updater: crate::update::Updater::new(),
+            restart_into: None,
             rng: seed(),
         };
         if app.audio.is_none() {
@@ -559,6 +565,13 @@ impl DiscApp {
     pub fn toggle_shuffle(&mut self) {
         self.settings.shuffle = !self.settings.shuffle;
         self.mark_settings_dirty();
+        self.show_toast(if self.settings.shuffle { "Shuffle on" } else { "Shuffle off" });
+    }
+
+    pub fn toggle_loop(&mut self) {
+        self.settings.loop_one = !self.settings.loop_one;
+        self.mark_settings_dirty();
+        self.show_toast(if self.settings.loop_one { "Loop on — repeating this track" } else { "Loop off" });
     }
 
     pub fn set_volume(&mut self, v: f32) {
@@ -595,6 +608,10 @@ impl DiscApp {
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
         let typing = ctx.egui_wants_keyboard_input();
+        let l_key = ctx.input(|i| !typing && !i.modifiers.command && i.key_pressed(egui::Key::L));
+        if l_key {
+            self.toggle_loop();
+        }
         let (focus_search, space, left, right, up, down, s_key) = ctx.input(|i| {
             let ctrl_f = i.modifiers.command && i.key_pressed(egui::Key::F);
             (
@@ -647,6 +664,13 @@ impl DiscApp {
             if let Some(a) = &mut self.audio {
                 a.mark_unloaded();
             }
+            // Loop: start the same track over instead of moving on.
+            if self.settings.loop_one {
+                if let Some(t) = self.current.clone() {
+                    self.play_track(&t, 0.0);
+                    return;
+                }
+            }
             if self.queue_index.is_some() {
                 self.play_next();
             }
@@ -663,9 +687,24 @@ impl DiscApp {
                     match action {
                         PendingConfirm::RemoveFolders(ids) => self.remove_folders(&ids),
                         PendingConfirm::DeleteTrack(t) => self.delete_track(&t),
+                        PendingConfirm::Update(rel) => self.updater.install(ctx, rel),
                     }
                 }
             }
+        }
+    }
+
+    fn handle_update(&mut self, ctx: &egui::Context) {
+        match self.updater.status() {
+            crate::update::Status::Failed(msg) => {
+                self.show_toast(msg);
+                self.updater.reset();
+            }
+            crate::update::Status::Ready(exe) if self.restart_into.is_none() => {
+                self.restart_into = Some(exe);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            _ => {}
         }
     }
 
@@ -687,7 +726,7 @@ impl DiscApp {
                     .corner_radius(egui::CornerRadius::same(8))
                     .inner_margin(egui::Margin::symmetric(14, 9))
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new(text).font(theme::font(13.0)).color(theme::TEXT));
+                        ui.add(egui::Label::new(egui::RichText::new(text).font(theme::font(13.0)).color(theme::TEXT)).extend());
                     });
             });
         ctx.request_repaint_after(Duration::from_millis(500));
@@ -722,6 +761,7 @@ impl eframe::App for DiscApp {
         crate::ui_tracks::show(self, ui, &ctx, frame);
 
         self.handle_confirm(&ctx);
+        self.handle_update(&ctx);
         self.draw_toast(&ctx);
         self.rebuild_if_needed();
 
@@ -757,6 +797,10 @@ impl eframe::App for DiscApp {
         self.settings.favorites = self.favorites.iter().cloned().collect();
         persist::save(&self.settings);
         self.waves.save_cache();
+        // Everything is saved; hand over to the freshly installed version.
+        if let Some(exe) = self.restart_into.take() {
+            let _ = std::process::Command::new(exe).spawn();
+        }
     }
 }
 

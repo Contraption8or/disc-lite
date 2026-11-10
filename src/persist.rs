@@ -18,6 +18,8 @@ pub struct Settings {
     #[serde(default = "default_volume")]
     pub volume: f32,
     pub shuffle: bool,
+    /// Repeat the current track instead of moving on.
+    pub loop_one: bool,
     pub expanded: Vec<String>,
     pub placement: HashMap<String, String>,
     pub order: HashMap<String, Vec<String>>,
@@ -30,6 +32,7 @@ impl Default for Settings {
             favorites: Vec::new(),
             volume: default_volume(),
             shuffle: false,
+            loop_one: false,
             expanded: Vec::new(),
             placement: HashMap::new(),
             order: HashMap::new(),
