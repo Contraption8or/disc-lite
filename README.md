@@ -4,37 +4,63 @@ A stripped-down, black-and-white version of [Disc](https://github.com/Contraptio
 folders, waveform rows, and drag-to-Premiere. No themes, panels, tags,
 collections, timers, or settings screens.
 
-Runs side by side with regular Disc — separate app name, app ID, saved data,
-and dev port (5174 instead of 5173).
+Version 2 is a ground-up rewrite in Rust with a fully native UI (egui), so
+there's no browser engine inside: one ~7.5 MB `.exe`, a window in about a
+quarter of a second, and a fraction of the Electron version's memory.
 
 ## What's in it
 
 - **One fixed-width folder column** on the left (260px, never resizes with the
-  window): *All Music*, *Favorites*, then every folder as a plain name. `+`
-  adds folders (multi-select); double-click a name to rename; hover for `×`
-  to remove (files on disk are never touched).
+  window): *All Music*, *Favorites*, then a VS Code-style folder tree. The
+  folder icon with `+` adds folders (multi-select); double-click a folder to
+  rename it; hover for `×` to remove it (files on disk are never touched).
+- **Move folders around** by dragging: drop on the top/bottom edge of a row to
+  put it before/after, on the middle to nest it inside. Hovering a collapsed
+  folder opens it; `Esc` cancels. Shift/Ctrl-click to select several, then
+  drag them together or remove them all from Disc. Moves only change Disc's
+  list — nothing on disk moves.
 - **Track list** with a waveform per row. Click the waveform to seek, **drag
-  it out onto Premiere's timeline**, heart to favorite, right-click for
-  Rename / Copy Path / Reveal in Explorer / Delete (to the Recycle Bin).
+  it out onto Premiere's timeline** (or Explorer, a DAW, ...), heart to
+  favorite, right-click for Rename / Copy File Path / Reveal in Explorer /
+  Delete (to the Recycle Bin).
 - **Play / Shuffle** over whatever's shown, with a bottom bar (prev, play,
-  next, shuffle, volume). Shuffle reshuffles and keeps going at the end.
-- **Search** across all music. Drop audio files onto a folder's view (or use
-  *Import*) to copy them into that folder.
+  next, shuffle, volume, pin on top). Shuffle reshuffles and keeps going at
+  the end.
+- **Search** across all music. Drop audio files onto the window (or use
+  *Import*) to copy them into the folder you're viewing.
 - Keys: `Space` play/pause · `←`/`→` seek 5s · `↑`/`↓` volume · `S` shuffle ·
-  `Ctrl+F` or `/` search.
-- Pin on top, and the same window snapping as Disc.
+  `Ctrl+F` or `/` search · in the folder column: `Delete` remove selected,
+  `Ctrl+A` select all, `Esc` clear selection.
 
-## Develop
+On first launch it imports folders, favorites, the folder arrangement,
+volume, and shuffle from the old Electron Disc Lite (read-only — the old app's
+data is left as it was).
+
+## Build
+
+Needs a Rust toolchain (`rustup`, stable).
 
 ```
-npm install
-npm run dev      # Vite on :5174 + Electron
-npm run build    # production Vite build
-npm run dist     # installer in release/
+cargo run              # debug build
+cargo build --release  # target/release/disc-lite.exe — the whole app
 ```
 
-Everything persists in `localStorage` (`lite.folders`, `disc.favorites`,
-`disc.volume`, `disc.shuffle`). The architecture is the same as Disc's:
-`electron/main.js` (Node, all filesystem/OS access) ↔ `electron/preload.cjs`
-(the only bridge) ↔ `src/` (React). State lives in `src/App.jsx` and reaches
-components through `src/context/DiscContext.jsx`.
+Settings live in `%APPDATA%\Disc Lite\disc-lite-settings.json`, waveform
+peaks in `waveforms.cache` next to it. Set `DISC_LITE_DATA` to a folder to
+run against a throwaway profile instead.
+
+## Layout
+
+- `src/main.rs` — window setup
+- `src/app.rs` — all app state and behavior (library, playback queue,
+  folders, files, shortcuts, saving)
+- `src/ui_sidebar.rs`, `src/ui_tracks.rs`, `src/ui_player.rs` — the three
+  areas of the window
+- `src/tree.rs` — the folder tree model and moves (same `placement`/`order`
+  format the Electron version used)
+- `src/library.rs` — background scanning, file watching, file operations
+- `src/waveform.rs` — background waveform decoding + disk cache
+- `src/audio.rs` — playback (rodio); `src/dragout.rs` — native drag-out
+- `src/migrate.rs` — one-time import from the Electron version
+- `src/theme.rs`, `src/icons.rs`, `src/widgets.rs` — palette, painted
+  icons, shared widgets

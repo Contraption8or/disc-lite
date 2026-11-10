@@ -1,34 +1,5 @@
-# Dependencies
-node_modules/
-
-# Build output
-dist/
-dist-electron/
-release/
-
-# Native addon build output (native/<name>/build/) — machine/ABI-specific
-# compiled binaries, rebuilt fresh by `npm install` on each machine
-native/*/build/
-native/*/node_modules/
-
-# Environment / local config
-.env
-.env.local
-.env.*.local
-
-# Logs
+/target
 *.log
-npm-debug.log*
-
-# OS-generated files
-.DS_Store
 Thumbs.db
 desktop.ini
-
-# Editor
-.vscode/*
-!.vscode/extensions.json
 .idea/
-
-# Electron-builder artifacts occasionally left outside release/
-*.blockmap
