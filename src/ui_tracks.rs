@@ -38,12 +38,12 @@ fn view_title(app: &DiscApp) -> String {
 }
 
 pub fn show(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &eframe::Frame) {
-    let panel_frame = egui::Frame::new().fill(theme::BG_APP).inner_margin(egui::Margin { left: 20, right: 20, top: 14, bottom: 0 });
+    let panel_frame = egui::Frame::new().fill(theme::BG_APP()).inner_margin(egui::Margin { left: 20, right: 20, top: 14, bottom: 0 });
     egui::CentralPanel::default().frame(panel_frame).show(ui, |ui| {
         toolbar(app, ui, ctx);
         ui.add_space(12.0);
         let r = ui.available_rect_before_wrap();
-        ui.painter().line_segment([pos2(r.left(), r.top()), pos2(r.right(), r.top())], Stroke::new(1.0, theme::GUIDE));
+        ui.painter().line_segment([pos2(r.left(), r.top()), pos2(r.right(), r.top())], Stroke::new(1.0, theme::GUIDE()));
         ui.add_space(6.0);
         list(app, ui, ctx, frame);
         drop_overlay(app, ui, ctx);
@@ -85,9 +85,9 @@ fn toolbar(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     let search_id = Id::new("search");
     let focused = ctx.memory(|m| m.has_focus(search_id));
     let p = ui.painter();
-    p.rect_filled(srect, 7.0, theme::BG_PANEL_ALT);
-    p.rect_stroke(srect, 7.0, Stroke::new(1.0, if focused { theme::TEXT3 } else { theme::BORDER }), StrokeKind::Inside);
-    icons::search(p, pos2(srect.left() + 15.0, srect.center().y), 15.0, theme::TEXT3);
+    p.rect_filled(srect, 7.0, theme::BG_PANEL_ALT());
+    p.rect_stroke(srect, 7.0, Stroke::new(1.0, if focused { theme::TEXT3() } else { theme::BORDER() }), StrokeKind::Inside);
+    icons::search(p, pos2(srect.left() + 15.0, srect.center().y), 15.0, theme::TEXT3());
     let edit_rect = Rect::from_min_max(pos2(srect.left() + 28.0, srect.top() + 3.0), pos2(srect.right() - 8.0, srect.bottom() - 3.0));
     let resp = right.put(
         edit_rect,
@@ -95,7 +95,7 @@ fn toolbar(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
             .id(search_id)
             .frame(egui::Frame::NONE)
             .font(theme::font(13.0))
-            .hint_text(egui::RichText::new("Search all music   Ctrl+F").color(theme::TEXT3))
+            .hint_text(egui::RichText::new("Search all music   Ctrl+F").color(theme::TEXT3()))
             .vertical_align(egui::Align::Center),
     );
     if app.search_focus_requested {
@@ -115,13 +115,13 @@ fn toolbar(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     // Left side: title + count, in whatever room is left.
     let left_w = (srect.left() - row.left() - 16.0).max(0.0);
     let p = ui.painter();
-    let g = widgets::elided(p, &title, theme::font_semibold(20.0), theme::TEXT, left_w);
+    let g = widgets::elided(p, &title, theme::font_semibold(20.0), theme::TEXT(), left_w);
     let tw = g.size().x;
-    p.galley(pos2(row.left(), row.center().y - g.size().y / 2.0), g, theme::TEXT);
+    p.galley(pos2(row.left(), row.center().y - g.size().y / 2.0), g, theme::TEXT());
     let room = left_w - tw - 12.0;
     if room > 40.0 {
-        let g = widgets::elided(p, &summary, theme::font(12.5), theme::TEXT3, room);
-        p.galley(pos2(row.left() + tw + 12.0, row.center().y - g.size().y / 2.0 + 2.0), g, theme::TEXT3);
+        let g = widgets::elided(p, &summary, theme::font(12.5), theme::TEXT3(), room);
+        p.galley(pos2(row.left() + tw + 12.0, row.center().y - g.size().y / 2.0 + 2.0), g, theme::TEXT3());
     }
 }
 
@@ -157,9 +157,9 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
             {
                 let p = ui.painter();
                 if is_current {
-                    p.rect_filled(inner, 8.0, theme::ROW_CURRENT);
+                    p.rect_filled(inner, 8.0, theme::ROW_CURRENT());
                 } else if hovered {
-                    p.rect_filled(inner, 8.0, theme::ROW_HOVER);
+                    p.rect_filled(inner, 8.0, theme::ROW_HOVER());
                 }
             }
 
@@ -172,11 +172,11 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
             {
                 let p = ui.painter();
                 if t.is_video {
-                    icons::video(p, pc, 18.0, theme::TEXT3);
+                    icons::video(p, pc, 18.0, theme::TEXT3());
                 } else {
-                    let fill = if is_current { theme::ACCENT } else if presp.hovered() { theme::BG_ACTIVE } else { theme::BG_HOVER };
-                    p.circle_filled(pc, 15.0, if missing { theme::BG_PANEL_ALT } else { fill });
-                    let col = if is_current { theme::ACCENT_TEXT } else if missing { theme::TEXT3 } else { theme::TEXT };
+                    let fill = if is_current { theme::ACCENT() } else if presp.hovered() { theme::BG_ACTIVE() } else { theme::BG_HOVER() };
+                    p.circle_filled(pc, 15.0, if missing { theme::BG_PANEL_ALT() } else { fill });
+                    let col = if is_current { theme::ACCENT_TEXT() } else if missing { theme::TEXT3() } else { theme::TEXT() };
                     if is_current && playing {
                         icons::pause(p, pc, 11.0, col);
                     } else {
@@ -221,7 +221,7 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                 }
             } else {
                 let p = ui.painter();
-                let col = if missing { theme::TEXT3 } else { theme::TEXT };
+                let col = if missing { theme::TEXT3() } else { theme::TEXT() };
                 let g = widgets::elided(p, &t.stem, theme::font_semibold(13.5), col, info_w);
                 p.galley(pos2(info_left, inner.center().y - 1.0 - g.size().y), g, col);
             }
@@ -235,7 +235,7 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                 }
                 meta.push(format_size(t.size));
                 let p = ui.painter();
-                let col = if missing { theme::DANGER } else { theme::TEXT3 };
+                let col = if missing { theme::DANGER() } else { theme::TEXT3() };
                 let g = widgets::elided(p, &meta.join("  ·  "), theme::font(12.0), col, info_w);
                 p.galley(pos2(info_left, inner.center().y + 2.0), g, col);
             }
@@ -246,7 +246,7 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                     Align2::RIGHT_CENTER,
                     format_duration(if is_current { (d * progress as f64).max(0.0) } else { d }),
                     theme::font(12.5),
-                    if is_current { theme::TEXT } else { theme::TEXT3 },
+                    if is_current { theme::TEXT() } else { theme::TEXT3() },
                 );
             }
 
@@ -257,23 +257,23 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                 let hover_x = wresp.hover_pos().map(|p| p.x);
                 let p = ui.painter();
                 let played_x = if is_current { wave.left() + wave.width() * progress } else { wave.left() };
-                let base = if hovered || is_current { theme::WAVEFORM_HOVER } else { theme::WAVEFORM };
+                let base = if hovered || is_current { theme::WAVEFORM_HOVER() } else { theme::WAVEFORM() };
                 if t.is_video {
-                    p.text(wave.left_center(), Align2::LEFT_CENTER, "Video — drag to export", theme::font(12.0), theme::TEXT3);
+                    p.text(wave.left_center(), Align2::LEFT_CENTER, "Video — drag to export", theme::font(12.0), theme::TEXT3());
                 } else {
                     if let Wave::Ready(peaks) = app.waves.get(&t.id, &t.path) {
                         draw_wave(p, wave, &peaks, played_x, base, hover_x.filter(|_| can_play));
                     } else {
                         // Still decoding: just the center line.
                         let y = wave.center().y;
-                        p.line_segment([pos2(wave.left(), y), pos2(wave.right(), y)], Stroke::new(1.0, theme::WAVEFORM_BASE));
+                        p.line_segment([pos2(wave.left(), y), pos2(wave.right(), y)], Stroke::new(1.0, theme::WAVEFORM_BASE()));
                         if is_current {
-                            p.line_segment([pos2(wave.left(), y), pos2(played_x, y)], Stroke::new(1.0, theme::TEXT2));
+                            p.line_segment([pos2(wave.left(), y), pos2(played_x, y)], Stroke::new(1.0, theme::WAVE_PLAYED()));
                         }
                     }
                 }
                 if let Some(x) = hover_x.filter(|_| can_play) {
-                    p.line_segment([pos2(x, wave.top() - 2.0), pos2(x, wave.bottom() + 2.0)], Stroke::new(1.0, theme::TEXT));
+                    p.line_segment([pos2(x, wave.top() - 2.0), pos2(x, wave.bottom() + 2.0)], Stroke::new(1.0, theme::TEXT()));
                 }
                 if wresp.drag_started() {
                     actions.push(Action::DragOut(t.clone()));
@@ -291,7 +291,7 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
             let hresp = ui.interact(hrect, Id::new(("track-fav", &t.id)), Sense::click());
             crate::widgets::hand(&hresp, true);
             if fav || hovered || hresp.hovered() {
-                let col = if fav { theme::TEXT } else if hresp.hovered() { theme::TEXT2 } else { theme::TEXT3 };
+                let col = if fav { theme::TEXT() } else if hresp.hovered() { theme::TEXT2() } else { theme::TEXT3() };
                 icons::heart(ui.painter(), heart_c, 15.0, col, fav);
             }
             if hresp.on_hover_text(if fav { "Remove from Favorites" } else { "Add to Favorites" }).clicked() {
@@ -317,7 +317,7 @@ fn list(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &efram
                     ui.close();
                 }
                 ui.separator();
-                if ui.button(egui::RichText::new("Delete Song…").color(theme::DANGER)).clicked() {
+                if ui.button(egui::RichText::new("Delete Song…").color(theme::DANGER())).clicked() {
                     actions.push(Action::AskDelete(tc.clone()));
                     ui.close();
                 }
@@ -467,9 +467,9 @@ fn draw_wave(p: &egui::Painter, r: Rect, peaks: &crate::waveform::Peaks, played_
         let x0 = r.left() + c as f32 * col_w;
         let x1 = x0 + col_w;
         let col = if x1 <= played_x {
-            theme::TEXT
+            theme::WAVE_PLAYED()
         } else if hover_x.is_some_and(|hx| x1 <= hx) {
-            theme::WAVEFORM_PREVIEW
+            theme::WAVEFORM_PREVIEW()
         } else {
             base
         };
@@ -520,10 +520,10 @@ fn drop_overlay(app: &DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     let r = ui.max_rect().shrink(10.0);
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("drop-overlay")));
     p.rect_filled(r, 12.0, egui::Color32::from_black_alpha(200));
-    p.rect_stroke(r, 12.0, Stroke::new(1.5, theme::TEXT2), StrokeKind::Inside);
+    p.rect_stroke(r, 12.0, Stroke::new(1.5, theme::TEXT2()), StrokeKind::Inside);
     let text = match app.active_dir() {
         Some((_, name)) => format!("Drop to add to {name}"),
         None => "Pick a folder on the left first".into(),
     };
-    p.text(r.center(), Align2::CENTER_CENTER, text, theme::font_semibold(18.0), theme::TEXT);
+    p.text(r.center(), Align2::CENTER_CENTER, text, theme::font_semibold(18.0), theme::TEXT());
 }

@@ -226,3 +226,16 @@ pub fn repeat_one(p: &Painter, c: Pos2, s: f32, col: Color32) {
     p.line_segment([pos2(tip.x + a, tip.y + a), tip], st);
     p.text(c, eframe::egui::Align2::CENTER_CENTER, "1", crate::theme::font_semibold(s * 0.62), col);
 }
+
+/// An artist's palette: a round outline with paint dots and a thumb hole.
+pub fn palette(p: &Painter, c: Pos2, s: f32, col: Color32, hole: Color32) {
+    let r = s * 0.42;
+    p.circle_stroke(c, r, stroke(col, 1.3));
+    // Thumb hole at the lower right, punched out with the background color.
+    let hole_c = pos2(c.x + r * 0.45, c.y + r * 0.42);
+    p.circle_filled(hole_c, r * 0.24, hole);
+    p.circle_stroke(hole_c, r * 0.24, stroke(col, 1.1));
+    for (dx, dy) in [(-0.45, -0.25), (-0.05, -0.52), (0.4, -0.22), (-0.42, 0.25)] {
+        p.circle_filled(pos2(c.x + r * dx, c.y + r * dy), s * 0.07, col);
+    }
+}

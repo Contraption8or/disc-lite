@@ -65,6 +65,10 @@ pub struct DiscApp {
     pub muted_volume: Option<f32>,
 
     pub sb: SidebarState,
+    /// The theme picker popup in the folder column footer.
+    pub theme_menu_open: bool,
+    /// Where that popup was last drawn (None while closed).
+    pub theme_menu_rect: Option<egui::Rect>,
     /// (track id, text being typed)
     pub renaming: Option<(String, String)>,
     pub renaming_focus_requested: bool,
@@ -87,7 +91,6 @@ pub struct DiscApp {
 impl DiscApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
-        theme::install(&ctx);
         ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
 
         // First launch: bring over the old Disc Lite's setup if it exists.
@@ -101,6 +104,7 @@ impl DiscApp {
         if imported {
             persist::save(&settings);
         }
+        theme::install(&ctx, &settings.theme);
 
         let audio = Audio::new().ok();
         if let Some(a) = &audio {
@@ -130,6 +134,8 @@ impl DiscApp {
             pinned: false,
             muted_volume: None,
             sb: SidebarState::default(),
+            theme_menu_open: false,
+            theme_menu_rect: None,
             renaming: None,
             renaming_focus_requested: false,
             confirm: None,
@@ -150,6 +156,9 @@ impl DiscApp {
             app.show_toast("No audio output device found — playback is unavailable");
         }
         app.sync_folders();
+        // Quietly look for a newer release; the footer shows an Update
+        // button only if there is one.
+        app.updater.check(&ctx);
         app
     }
 
@@ -595,6 +604,12 @@ impl DiscApp {
         }
     }
 
+    pub fn set_theme(&mut self, ctx: &egui::Context, id: &str) {
+        theme::set_theme(ctx, id);
+        self.settings.theme = theme::current().id.to_string();
+        self.mark_settings_dirty();
+    }
+
     pub fn toggle_pin(&mut self, ctx: &egui::Context) {
         self.pinned = !self.pinned;
         ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(if self.pinned {
@@ -721,12 +736,12 @@ impl DiscApp {
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(theme::BG_PANEL_ALT)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::BG_PANEL_ALT())
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER()))
                     .corner_radius(egui::CornerRadius::same(8))
                     .inner_margin(egui::Margin::symmetric(14, 9))
                     .show(ui, |ui| {
-                        ui.add(egui::Label::new(egui::RichText::new(text).font(theme::font(13.0)).color(theme::TEXT)).extend());
+                        ui.add(egui::Label::new(egui::RichText::new(text).font(theme::font(13.0)).color(theme::TEXT())).extend());
                     });
             });
         ctx.request_repaint_after(Duration::from_millis(500));

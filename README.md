@@ -33,8 +33,13 @@ quarter of a second, and a fraction of the Electron version's memory.
   `Ctrl+F` or `/` search · in the folder column: `Delete` remove selected,
   `Ctrl+A` select all, `Esc` clear selection.
 
-**Check for updates** sits at the bottom of the folder column. If a newer
-release is on GitHub it becomes *Update to X*: one click downloads it,
+**Themes**: the small palette icon next to the version number (bottom of
+the folder column) switches between *Mono* (black and white) and *Plum*
+(dusky wine with a peach accent). The choice is remembered.
+
+**Updates**: Disc Lite quietly checks GitHub for a newer release when it
+launches. If there is one, an *Update to X* button appears at the bottom of
+the folder column: one click downloads it,
 swaps it in for the running exe, and restarts Disc Lite (if the exe's folder
 isn't writable, it opens the download page instead).
 
@@ -68,6 +73,6 @@ run against a throwaway profile instead.
 - `src/waveform.rs` — background waveform decoding + disk cache
 - `src/audio.rs` — playback (rodio); `src/dragout.rs` — native drag-out
 - `src/migrate.rs` — one-time import from the Electron version
-- `src/update.rs` — "Check for updates" and the in-place exe swap
-- `src/theme.rs`, `src/icons.rs`, `src/widgets.rs` — palette, painted
+- `src/update.rs` — update check at launch and the in-place exe swap
+- `src/theme.rs`, `src/icons.rs`, `src/widgets.rs` — themes, painted
   icons, shared widgets

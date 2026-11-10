@@ -98,7 +98,9 @@ impl Updater {
             let result = fetch_latest().map(|rel| {
                 if is_newer(&rel.version, VERSION) { Status::Available(rel) } else { Status::UpToDate }
             });
-            *status.lock().unwrap() = result.unwrap_or_else(Status::Failed);
+            // This runs by itself at launch, so a failed check (offline, GitHub
+            // down) stays quiet: no update button, no message.
+            *status.lock().unwrap() = result.unwrap_or(Status::Idle);
             ctx.request_repaint();
         });
     }

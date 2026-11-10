@@ -9,6 +9,10 @@ fn default_volume() -> f32 {
     0.8
 }
 
+fn default_theme() -> String {
+    "mono".into()
+}
+
 /// Everything Disc Lite remembers between launches.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -20,6 +24,9 @@ pub struct Settings {
     pub shuffle: bool,
     /// Repeat the current track instead of moving on.
     pub loop_one: bool,
+    /// Color theme id (see theme::THEMES).
+    #[serde(default = "default_theme")]
+    pub theme: String,
     pub expanded: Vec<String>,
     pub placement: HashMap<String, String>,
     pub order: HashMap<String, Vec<String>>,
@@ -33,6 +40,7 @@ impl Default for Settings {
             volume: default_volume(),
             shuffle: false,
             loop_one: false,
+            theme: default_theme(),
             expanded: Vec::new(),
             placement: HashMap::new(),
             order: HashMap::new(),
