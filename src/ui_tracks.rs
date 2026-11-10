@@ -13,6 +13,8 @@ use crate::widgets::{self, ButtonKind, Confirm};
 use crate::{icons, theme};
 
 const ROW_H: f32 = 52.0;
+/// Radius of the track list's top-left corner.
+const CORNER: f32 = 10.0;
 
 enum Action {
     Toggle(TrackRef),
@@ -41,8 +43,13 @@ fn view_title(app: &DiscApp) -> String {
 }
 
 pub fn show(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &eframe::Frame) {
-    let panel_frame = egui::Frame::new().fill(theme::BG_APP()).inner_margin(egui::Margin { left: 20, right: 20, top: 14, bottom: 0 });
-    egui::CentralPanel::default().frame(panel_frame).show(ui, |ui| {
+    // The track list sits inset in the lighter frame (title bar, folder
+    // column, player) with a rounded top-left corner, like Discord.
+    let panel_frame = egui::Frame::new()
+        .fill(theme::BG_APP())
+        .corner_radius(egui::CornerRadius { nw: CORNER as u8, ne: 0, sw: 0, se: 0 })
+        .inner_margin(egui::Margin { left: 20, right: 20, top: 14, bottom: 0 });
+    let panel = egui::CentralPanel::default().frame(panel_frame).show(ui, |ui| {
         toolbar(app, ui, ctx);
         ui.add_space(12.0);
         let r = ui.available_rect_before_wrap();
@@ -51,6 +58,17 @@ pub fn show(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context, frame: &e
         list(app, ui, ctx, frame);
         drop_overlay(app, ui, ctx);
     });
+    // Divider along the top and left edges, following the rounded corner.
+    // (Drawn oversized to the right and bottom, then clipped, so only those
+    // two edges show; the player bar draws its own line below.)
+    let r = panel.response.rect;
+    let outline = Rect::from_min_max(r.min, r.max + vec2(40.0, 40.0));
+    ui.painter().with_clip_rect(r.expand(1.0)).rect_stroke(
+        outline,
+        egui::CornerRadius { nw: CORNER as u8, ne: 0, sw: 0, se: 0 },
+        Stroke::new(1.0, theme::BORDER()),
+        StrokeKind::Inside,
+    );
 }
 
 fn toolbar(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {

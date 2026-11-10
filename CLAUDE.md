@@ -39,3 +39,10 @@ There is no test suite.
 - Colors are functions (`theme::TEXT()`), not constants, so a theme switch
   applies next frame. A new theme is one more `Palette` in `theme::THEMES`;
   a new color is a field on `Palette` plus its accessor fn.
+- The window is undecorated; `titlebar.rs` draws the title bar. Moving
+  goes through `ViewportCommand::StartDrag` (Windows' own move loop, so
+  edge-snapping works), edges resize via `BeginResize`, and maximized
+  windows need no extra inset (checked against a real screen capture —
+  `GetWindowRect` includes the invisible shadow, which is misleading).
+  `visuals.panel_fill` is the lighter panel color on purpose: it shows
+  through the track list's rounded corner.

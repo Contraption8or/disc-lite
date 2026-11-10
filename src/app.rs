@@ -79,6 +79,8 @@ pub struct DiscApp {
     pub theme_menu_open: bool,
     /// Where that popup was last drawn (None while closed).
     pub theme_menu_rect: Option<egui::Rect>,
+    /// Which theme the native title bar was last painted for.
+    titlebar_theme: Option<&'static str>,
     /// (track id, text being typed)
     pub renaming: Option<(String, String)>,
     pub renaming_focus_requested: bool,
@@ -149,6 +151,7 @@ impl DiscApp {
             sb: SidebarState::default(),
             theme_menu_open: false,
             theme_menu_rect: None,
+            titlebar_theme: None,
             renaming: None,
             renaming_focus_requested: false,
             confirm: None,
@@ -868,6 +871,12 @@ impl eframe::App for DiscApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         crate::widgets::track_context_menu_clicks(&ctx);
+        // Keep the Windows title bar in the theme's colors (and repaint it
+        // when the theme changes).
+        let theme_now = theme::current();
+        if self.titlebar_theme != Some(theme_now.id) && crate::titlebar::apply(frame, theme_now) {
+            self.titlebar_theme = Some(theme_now.id);
+        }
         self.drain_scans();
         self.rebuild_if_needed();
         self.tick_playback();
@@ -875,6 +884,7 @@ impl eframe::App for DiscApp {
         self.handle_dropped_files(&ctx);
         self.rebuild_if_needed();
 
+        crate::titlebar::show(ui, &ctx);
         crate::ui_player::show(self, ui, &ctx);
         crate::ui_sidebar::show(self, ui, &ctx);
         crate::ui_tracks::show(self, ui, &ctx, frame);
@@ -892,6 +902,12 @@ impl eframe::App for DiscApp {
             ctx.request_repaint_after(Duration::from_millis(if focused { 33 } else { 250 }));
         }
         self.save_if_due();
+    }
+
+    /// What shows where nothing is painted (e.g. just outside the track
+    /// list's rounded corner): the frame color, not eframe's default near-black.
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        visuals.panel_fill.to_normalized_gamma_f32()
     }
 
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {

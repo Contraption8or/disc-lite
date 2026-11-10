@@ -10,7 +10,7 @@ const HEIGHT: f32 = 64.0;
 
 pub fn show(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     let frame = egui::Frame::new().fill(theme::BG_PANEL());
-    egui::Panel::bottom("player").exact_size(HEIGHT).resizable(false).frame(frame).show(ui, |ui| {
+    egui::Panel::bottom("player").exact_size(HEIGHT).resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
         let full = ui.max_rect();
         let p = ui.painter().clone();
         p.line_segment([full.left_top(), full.right_top()], egui::Stroke::new(1.0, theme::BORDER()));

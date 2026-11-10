@@ -172,7 +172,9 @@ pub fn set_theme(ctx: &egui::Context, theme_id: &str) {
     ctx.all_styles_mut(|style| {
         let v = &mut style.visuals;
         v.dark_mode = true;
-        v.panel_fill = t.bg_app;
+        // The lighter panel color sits behind everything, so the title bar,
+        // folder column and player read as one frame around the track list.
+        v.panel_fill = t.bg_panel;
         v.window_fill = t.bg_panel_alt;
         v.extreme_bg_color = t.bg_panel_alt;
         v.faint_bg_color = t.bg_panel;

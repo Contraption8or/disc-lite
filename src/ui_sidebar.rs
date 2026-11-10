@@ -1,6 +1,6 @@
 //! The fixed-width column on the left: All Music, Favorites, and the folder
 //! tree (VS Code style) with multi-select, rename, remove, and drag-to-move.
-//! Moving and removing only ever change Disc's own list — nothing on disk.
+//! Moving and removing only ever change Disc's own list â€” nothing on disk.
 
 use std::time::{Duration, Instant};
 
@@ -90,12 +90,12 @@ fn ask_remove(app: &mut DiscApp, ids: Vec<String>) {
         let name = app.settings.folders.iter().find(|f| f.id == ids[0]).map(|f| f.name.clone()).unwrap_or_default();
         (
             format!("Remove \"{name}\" from Disc?"),
-            "The folder and its files stay exactly where they are on disk — this only takes it off Disc's list.".to_string(),
+            "The folder and its files stay exactly where they are on disk â€” this only takes it off Disc's list.".to_string(),
         )
     } else {
         (
             format!("Remove {} folders from Disc?", ids.len()),
-            "The folders and their files stay exactly where they are on disk — this only takes them off Disc's list."
+            "The folders and their files stay exactly where they are on disk â€” this only takes them off Disc's list."
                 .to_string(),
         )
     };
@@ -133,12 +133,13 @@ fn target_valid(app: &DiscApp, keys: &[String], target: &DropTarget) -> bool {
 
 pub fn show(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     let frame = egui::Frame::new().fill(theme::BG_PANEL()).inner_margin(egui::Margin::symmetric(8, 10));
-    let panel = egui::Panel::left("sidebar").exact_size(WIDTH).resizable(false).frame(frame).show(ui, |ui| {
+    let panel = egui::Panel::left("sidebar").exact_size(WIDTH).resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
         footer(app, ui);
         sidebar_body(app, ui, ctx);
     });
     let rect = panel.response.rect;
-    ui.painter().line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, theme::BORDER()));
+    // (The divider between this column and the track list is drawn by the
+    // track list itself, along with its rounded corner.)
 
     // Keyboard focus follows the last click: inside the sidebar or not.
     let pressed_at = ctx.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
@@ -224,7 +225,7 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     if rows.is_empty() {
         let avail = ui.available_rect_before_wrap();
         let mut job = egui::text::LayoutJob::simple(
-            "Add a folder of music to get started. Disc reads it where it is — nothing gets copied or moved."
+            "Add a folder of music to get started. Disc reads it where it is â€” nothing gets copied or moved."
                 .to_string(),
             theme::font(12.5),
             theme::TEXT3(),
@@ -296,7 +297,7 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
             }
 
             // Not resp.hovered(): that goes false while the pointer is over
-            // the row's own × button, which would make the button vanish.
+            // the row's own Ã— button, which would make the button vanish.
             let hovered_row = ui.rect_contains_pointer(rect) && !dragging;
             let show_x = hovered_row && row.kind == NodeKind::Folder && !editing;
             let right_pad = if show_x { 28.0 } else { 8.0 };
@@ -346,7 +347,7 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                 continue;
             }
 
-            // Remove (×) on hover — only Disc's list, never the files.
+            // Remove (Ã—) on hover â€” only Disc's list, never the files.
             let mut consumed = false;
             if show_x {
                 let xr = Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y), vec2(20.0, 20.0));
@@ -679,7 +680,7 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
 fn footer(app: &mut DiscApp, ui: &mut egui::Ui) {
     use crate::update::{Status, VERSION};
     let frame = egui::Frame::new().fill(theme::BG_PANEL());
-    egui::Panel::bottom("sidebar-footer").exact_size(30.0).resizable(false).frame(frame).show(ui, |ui| {
+    egui::Panel::bottom("sidebar-footer").exact_size(30.0).resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
         let r = ui.max_rect();
         let p = ui.painter().clone();
         p.line_segment([pos2(r.left(), r.top()), pos2(r.right(), r.top())], Stroke::new(1.0, theme::GUIDE()));
@@ -697,8 +698,8 @@ fn footer(app: &mut DiscApp, ui: &mut egui::Ui) {
         // update (or one is being installed).
         let (label, clickable, highlight) = match &status {
             Status::Available(rel) => (format!("Update to {}", rel.version), true, true),
-            Status::Downloading(v) => (format!("Downloading {v}…"), false, false),
-            Status::Ready(_) => ("Restarting…".to_string(), false, false),
+            Status::Downloading(v) => (format!("Downloading {v}â€¦"), false, false),
+            Status::Ready(_) => ("Restartingâ€¦".to_string(), false, false),
             Status::Idle | Status::Checking | Status::UpToDate | Status::Failed(_) => return,
         };
         let font = theme::font_semibold(11.5);

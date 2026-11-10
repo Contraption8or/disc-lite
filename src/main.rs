@@ -11,6 +11,7 @@ mod migrate;
 mod model;
 mod persist;
 mod theme;
+mod titlebar;
 mod tree;
 mod ui_player;
 mod ui_sidebar;
@@ -26,7 +27,9 @@ fn main() -> eframe::Result {
         .with_title("Disc Lite")
         .with_inner_size([1280.0, 800.0])
         .with_min_inner_size([760.0, 480.0])
-        .with_drag_and_drop(true);
+        .with_drag_and_drop(true)
+        // We draw our own title bar (see titlebar.rs).
+        .with_decorations(false);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/disc-icon-64.png")) {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
     }
