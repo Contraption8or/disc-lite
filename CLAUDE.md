@@ -46,3 +46,8 @@ There is no test suite.
   `GetWindowRect` includes the invisible shadow, which is misleading).
   `visuals.panel_fill` is the lighter panel color on purpose: it shows
   through the track list's rounded corner.
+- winit leaves a 1px non-client strip at the top of frameless-with-shadow
+  windows (its shadow hack). `titlebar::no_top_gap` swaps in a window proc
+  that answers WM_NCCALCSIZE with "client = whole window" (except when
+  maximized) and gets the shadow via a 1px *bottom* DWM frame extension
+  instead (a top one would make DWM draw a caption).

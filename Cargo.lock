@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "disc-lite"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "crossbeam-channel",
  "dirs",

@@ -167,6 +167,8 @@ pub fn apply(frame: &eframe::Frame, p: &Palette) -> bool {
         let Ok(handle) = frame.window_handle() else { return false };
         let RawWindowHandle::Win32(w) = handle.as_raw() else { return false };
         let hwnd = w.hwnd.get() as *mut c_void;
+        #[cfg(target_pointer_width = "64")]
+        no_top_gap::install(hwnd);
         // Barely lighter than the title bar, so the top edge melts into the bar
         // (like Discord) instead of drawing a bright line around the window.
         let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * 0.3).round() as u8;
@@ -193,3 +195,87 @@ pub fn apply(frame: &eframe::Frame, p: &Palette) -> bool {
     }
 }
 
+
+/// Removes the 1px strip winit leaves along the top of a frameless window.
+///
+/// winit keeps the shadow on frameless windows by leaving 1px of non-client
+/// frame at the top (its own comment calls it "a small black 1px border"),
+/// which shows as a gap above our title bar. Instead we make the client area
+/// cover the whole window and ask DWM for the shadow directly, by extending
+/// its frame 1px into the *bottom* edge — the bottom so DWM never draws a
+/// caption at the top. Maximized windows are left to winit, which already
+/// sizes them to the monitor's work area exactly.
+#[cfg(all(windows, target_pointer_width = "64"))]
+mod no_top_gap {
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicIsize, Ordering};
+
+    const GWLP_WNDPROC: i32 = -4;
+    const WM_NCCALCSIZE: u32 = 0x0083;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+
+    #[repr(C)]
+    struct Margins {
+        left: i32,
+        right: i32,
+        top: i32,
+        bottom: i32,
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetWindowLongPtrW(hwnd: *mut c_void, index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: *mut c_void, index: i32, value: isize) -> isize;
+        fn CallWindowProcW(prev: isize, hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize;
+        fn IsZoomed(hwnd: *mut c_void) -> i32;
+        fn SetWindowPos(hwnd: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+    }
+    #[link(name = "dwmapi")]
+    unsafe extern "system" {
+        fn DwmExtendFrameIntoClientArea(hwnd: *mut c_void, margins: *const Margins) -> i32;
+    }
+
+    /// winit's window procedure, which ours forwards everything else to.
+    static PREVIOUS: AtomicIsize = AtomicIsize::new(0);
+
+    unsafe extern "system" fn proc(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize {
+        // wparam != 0: Windows is asking where the client area goes. Answering
+        // 0 without changing anything = the client area is the whole window.
+        if msg == WM_NCCALCSIZE && wparam != 0 && unsafe { IsZoomed(hwnd) } == 0 {
+            return 0;
+        }
+        unsafe { CallWindowProcW(PREVIOUS.load(Ordering::Relaxed), hwnd, msg, wparam, lparam) }
+    }
+
+    pub fn install(hwnd: *mut c_void) {
+        if PREVIOUS.load(Ordering::Relaxed) != 0 {
+            return; // already installed
+        }
+        // SAFETY: hwnd is our own live window, on the thread that owns it;
+        // `proc` matches the WNDPROC signature and forwards to winit's.
+        unsafe {
+            let previous = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
+            if previous == 0 {
+                return;
+            }
+            PREVIOUS.store(previous, Ordering::Relaxed);
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, proc as *const () as usize as isize);
+            let margins = Margins { left: 0, right: 0, top: 0, bottom: 1 };
+            DwmExtendFrameIntoClientArea(hwnd, &margins);
+            // Make Windows recompute the frame with the new rules right away.
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+}
