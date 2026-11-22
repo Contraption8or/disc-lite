@@ -5,6 +5,7 @@
 mod app;
 mod audio;
 mod dragout;
+mod folders;
 mod icons;
 mod library;
 mod migrate;

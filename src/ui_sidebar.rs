@@ -47,6 +47,8 @@ enum Action {
     StartRename(String),
     AskRemove(Vec<String>),
     Reveal(String),
+    AddInside(String),
+    Relink(String),
 }
 
 fn flatten(app: &DiscApp) -> Vec<Row> {
@@ -409,6 +411,17 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                     actions.push(Action::StartRename(key.clone()));
                     ui.close();
                 }
+                if ui.button("Add Folder Inside…").on_hover_text("Pick folders on disk to show nested under this one").clicked() {
+                    actions.push(Action::AddInside(key.clone()));
+                    ui.close();
+                }
+                if kind == NodeKind::Folder
+                    && ui.button("Change Linked Folder…").on_hover_text("Point this at a different folder on disk").clicked()
+                {
+                    actions.push(Action::Relink(key.clone()));
+                    ui.close();
+                }
+                ui.separator();
                 if ui.button("Reveal in Explorer").clicked() {
                     actions.push(Action::Reveal(key.clone()));
                     ui.close();
@@ -603,6 +616,8 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                 let ids = removable(app, &keys);
                 ask_remove(app, ids);
             }
+            Action::AddInside(k) => app.add_folders_into(&k),
+            Action::Relink(k) => app.relink_folder(&k),
             Action::Reveal(k) => {
                 let (folder_id, sub) = crate::tree::parse_selection(&k);
                 if let Some(f) = app.settings.folders.iter().find(|f| f.id == folder_id) {

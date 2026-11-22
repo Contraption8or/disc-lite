@@ -6,7 +6,7 @@ use eframe::egui;
 
 use crate::audio::Audio;
 use crate::library::{self, Library, ScanResult};
-use crate::model::{Folder, TrackRef, folder_name_from_path, new_folder_id};
+use crate::model::TrackRef;
 use crate::persist::{self, Settings};
 use crate::tree::{self, Model, parse_selection};
 use crate::waveform::Waveforms;
@@ -316,16 +316,21 @@ impl DiscApp {
 
     /// The real directory a view points at (for importing/dropping files).
     pub fn active_dir(&self) -> Option<(PathBuf, String)> {
-        if matches!(self.active.as_str(), "all" | "favorites" | "removed") {
+        self.node_dir(&self.active)
+    }
+
+    /// The directory on disk behind a tree node, and its display name.
+    pub fn node_dir(&self, key: &str) -> Option<(PathBuf, String)> {
+        if matches!(key, "" | "all" | "favorites" | "removed") {
             return None;
         }
-        let (folder_id, sub) = parse_selection(&self.active);
+        let (folder_id, sub) = parse_selection(key);
         let folder = self.settings.folders.iter().find(|f| f.id == folder_id)?;
         let mut dir = PathBuf::from(&folder.folder_path);
         for part in sub.split('/').filter(|s| !s.is_empty()) {
             dir.push(part);
         }
-        let name = self.model.nodes.get(&self.active).map(|n| n.name.clone()).unwrap_or_else(|| folder.name.clone());
+        let name = self.model.nodes.get(key).map(|n| n.name.clone()).unwrap_or_else(|| folder.name.clone());
         Some((dir, name))
     }
 
@@ -339,29 +344,77 @@ impl DiscApp {
     // --- Folders ------------------------------------------------------------
 
     pub fn add_folders(&mut self) {
-        let Some(picked) = rfd::FileDialog::new().set_title("Add music folders").pick_folders() else { return };
-        let existing: HashSet<String> =
-            self.settings.folders.iter().map(|f| f.folder_path.to_lowercase()).collect();
-        let mut fresh: Vec<Folder> = picked
-            .into_iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .filter(|p| !existing.contains(&p.to_lowercase()))
-            .map(|p| Folder { id: new_folder_id(), name: folder_name_from_path(&p), folder_path: p })
-            .collect();
-        // Folder ids are time-based; make sure a batch can't collide.
-        for (i, f) in fresh.iter_mut().enumerate() {
-            f.id = format!("{}-{i}", f.id);
+        self.add_folders_into("");
+    }
+
+    /// Picks directories and adds them to Disc nested under `parent` (a tree
+    /// node key; "" = top level). A directory that's already in Disc is moved
+    /// there instead of being added twice. The picker opens in the parent's
+    /// own directory, and its "New folder" button makes a new one on disk.
+    pub fn add_folders_into(&mut self, parent: &str) {
+        let parent_name = self.node_dir(parent).map(|(_, n)| n);
+        let mut dialog = rfd::FileDialog::new().set_title(match &parent_name {
+            Some(name) => format!("Add folders inside \"{name}\""),
+            None => "Add music folders".to_string(),
+        });
+        if let Some((dir, _)) = self.node_dir(parent).filter(|(d, _)| d.is_dir()) {
+            dialog = dialog.set_directory(dir);
         }
-        fresh.sort_by_key(|f| f.name.to_lowercase());
-        if fresh.is_empty() {
+        let Some(picked) = dialog.pick_folders() else { return };
+
+        let paths = picked.into_iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let result = crate::folders::nest_paths(&mut self.settings, &self.model, paths, parent);
+        let (added, moved) = (result.added.len(), result.moved);
+        if added + moved == 0 {
+            self.show_toast("Those folders can't go inside themselves");
             return;
         }
-        if fresh.len() == 1 {
-            self.active = fresh[0].id.clone();
+        if let [only] = result.added.as_slice() {
+            self.active = only.clone();
         }
-        self.settings.folders.extend(fresh);
+        if !parent.is_empty() {
+            self.expanded.insert(parent.to_string());
+        }
         self.mark_settings_dirty();
         self.sync_folders();
+
+        let where_ = parent_name.map(|n| format!(" inside \"{n}\"")).unwrap_or_default();
+        let msg = match (added, moved) {
+            (1, 0) => format!("Added 1 folder{where_}"),
+            (n, 0) => format!("Added {n} folders{where_}"),
+            (0, m) => format!("Moved {m} folder{}{where_} (already in Disc)", if m == 1 { "" } else { "s" }),
+            (n, m) => format!("Added {n} and moved {m} folder{}{where_}", if n + m == 1 { "" } else { "s" }),
+        };
+        self.show_toast(msg);
+    }
+
+    /// Points a Disc folder at a different directory on disk, keeping its
+    /// place in the tree. Its name follows the new directory unless it had
+    /// been renamed in Disc.
+    pub fn relink_folder(&mut self, id: &str) {
+        let Some(folder) = self.settings.folders.iter().find(|f| f.id == id).cloned() else { return };
+        let mut dialog = rfd::FileDialog::new().set_title(format!("Link \"{}\" to a folder", folder.name));
+        let current = PathBuf::from(&folder.folder_path);
+        if let Some(start) = [Some(current.as_path()), current.parent()].into_iter().flatten().find(|p| p.is_dir()) {
+            dialog = dialog.set_directory(start);
+        }
+        let Some(picked) = dialog.pick_folder() else { return };
+        let path = picked.to_string_lossy().into_owned();
+        match crate::folders::relink(&mut self.settings, id, &path) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(msg) => {
+                self.show_toast(msg);
+                return;
+            }
+        }
+        // Its old tracks are stale; the rescan fills in the new ones.
+        self.folder_tracks.remove(id);
+        self.missing.remove(id);
+        self.mark_settings_dirty();
+        self.sync_folders();
+        let name = self.settings.folders.iter().find(|f| f.id == id).map(|f| f.name.clone()).unwrap_or_default();
+        self.show_toast(format!("\"{name}\" now shows {}", picked.display()));
     }
 
     pub fn remove_folders(&mut self, ids: &[String]) {

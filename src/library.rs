@@ -212,10 +212,17 @@ impl Library {
             }
         }
         for (id, path) in folders {
-            if self.watched.contains_key(id) {
-                continue;
-            }
             let p = PathBuf::from(path);
+            match self.watched.get(id) {
+                Some(old) if *old == p => continue,
+                // Re-linked to a different directory: stop watching the old one.
+                Some(old) => {
+                    if let Some(w) = self.watcher.as_mut() {
+                        let _ = w.unwatch(old);
+                    }
+                }
+                None => {}
+            }
             if let Some(w) = self.watcher.as_mut() {
                 let _ = w.watch(&p, RecursiveMode::Recursive);
             }

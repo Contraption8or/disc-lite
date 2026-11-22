@@ -14,6 +14,10 @@ quarter of a second, and a fraction of the Electron version's memory.
   window): *All Music*, *Favorites*, then a VS Code-style folder tree. The
   folder icon with `+` adds folders (multi-select); double-click a folder to
   rename it; hover for `×` to remove it (files on disk are never touched).
+  Right-click a folder → *Add Folder Inside…* to pick folders on disk that
+  show nested under it (the picker opens in that folder, and its "New folder"
+  button makes a fresh one), or *Change Linked Folder…* to point a folder at a
+  different directory while keeping its place in the tree.
 - **Move folders around** by dragging: drop on the top/bottom edge of a row to
   put it before/after, on the middle to nest it inside. Hovering a collapsed
   folder opens it; `Esc` cancels. Shift/Ctrl-click to select several, then
