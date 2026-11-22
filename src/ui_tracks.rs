@@ -110,6 +110,7 @@ fn toolbar(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
             app.pick_and_import();
         }
     }
+    sort_menu(app, &mut right);
     right.add_space(6.0);
 
     let search_w = 240.0f32.min((right.available_width() - 160.0).max(120.0));
@@ -589,4 +590,46 @@ fn drop_overlay(app: &DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         None => "Pick a folder on the left first".into(),
     };
     p.text(r.center(), Align2::CENTER_CENTER, text, theme::font_semibold(18.0), theme::TEXT());
+}
+
+const SORTS: [(&str, &str); 5] = [
+    ("default", "Folder order"),
+    ("name", "Name"),
+    ("modified", "Date modified"),
+    ("size", "Size"),
+    ("type", "Type"),
+];
+
+/// The toolbar's Sort button: shows the current order ("Name ↑"), and opens
+/// a menu of orders. Picking the current one again flips its direction.
+fn sort_menu(app: &mut DiscApp, ui: &mut egui::Ui) {
+    let key = app.settings.sort.clone();
+    let desc = app.settings.sort_desc;
+    let arrow = if desc { "\u{2193}" } else { "\u{2191}" };
+    let label = match SORTS.iter().find(|(k, _)| *k == key) {
+        Some((k, name)) if *k != "default" => format!("{name} {arrow}"),
+        _ => "Sort".to_string(),
+    };
+    let resp = widgets::button(ui, &label, ButtonKind::Ghost, !app.view.is_empty(), None)
+        .on_hover_text("Sort this list");
+    let mut picked: Option<&'static str> = None;
+    egui::Popup::menu(&resp).show(|ui| {
+        ui.set_min_width(190.0);
+        for (k, name) in SORTS {
+            let current = k == key;
+            let mut b = egui::Button::new(name);
+            if current {
+                b = b.right_text(if k == "default" { "\u{2713}".to_string() } else { format!("\u{2713} {arrow}") });
+            }
+            let r = ui.add(b);
+            let r = if current && k != "default" { r.on_hover_text("Click again to reverse") } else { r };
+            if r.clicked() {
+                picked = Some(k);
+                ui.close();
+            }
+        }
+    });
+    if let Some(k) = picked {
+        app.set_sort(k);
+    }
 }

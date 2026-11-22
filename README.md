@@ -29,7 +29,9 @@ quarter of a second, and a fraction of the Electron version's memory.
   Remove from Disc (hides it; the file stays put, `Ctrl+Z` brings it back) /
   Delete (to the Recycle Bin). Removed tracks are listed under *Removed* in
   the sidebar, with Restore per track or *Restore all*. Shift+click a play
-  button to start the song from the beginning.
+  button to start the song from the beginning. *Sort* (next to Import)
+  orders the list by name, date modified, size or type; pick the same one
+  again to reverse it. The choice is remembered.
 - **Play** whatever's shown, with a bottom bar (prev, play, next, loop,
   shuffle, volume, pin on top). Play follows the Shuffle toggle; with it on,
   the queue reshuffles and keeps going at the end. Loop repeats the current

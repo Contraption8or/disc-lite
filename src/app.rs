@@ -316,8 +316,23 @@ impl DiscApp {
             } else {
                 self.model.node_tracks(&self.active)
             };
+            sort_tracks(&mut self.view, &self.settings.sort, self.settings.sort_desc);
             self.publish_to_claude();
         }
+    }
+
+    /// Picks a sort from the Sort menu. Picking the current one again flips
+    /// its direction; a new one starts in its natural direction (newest /
+    /// largest first for date and size, A→Z otherwise).
+    pub fn set_sort(&mut self, key: &str) {
+        if self.settings.sort == key && key != "default" {
+            self.settings.sort_desc = !self.settings.sort_desc;
+        } else {
+            self.settings.sort = key.to_string();
+            self.settings.sort_desc = matches!(key, "modified" | "size");
+        }
+        self.mark_settings_dirty();
+        self.view_dirty = true;
     }
 
     /// Hands the connector a fresh copy of what Claude can see.
@@ -379,6 +394,7 @@ impl DiscApp {
                 stem: stem_of(new),
                 rel_dir: t.rel_dir.clone(),
                 size: t.size,
+                modified: t.modified,
                 is_video: t.is_video,
                 folder_id: t.folder_id.clone(),
             })
@@ -1137,6 +1153,22 @@ impl eframe::App for DiscApp {
     }
 }
 
+/// Orders a track list for the Sort menu. "default" keeps folder order.
+/// Ties always fall back to the name (natural order: "2" before "10").
+pub fn sort_tracks(tracks: &mut [TrackRef], key: &str, desc: bool) {
+    use std::cmp::Ordering;
+    let ext = |t: &TrackRef| t.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let by_name = |a: &TrackRef, b: &TrackRef| tree::natural_cmp(&a.stem, &b.stem);
+    let cmp: Box<dyn Fn(&TrackRef, &TrackRef) -> Ordering> = match key {
+        "name" => Box::new(by_name),
+        "modified" => Box::new(move |a, b| a.modified.cmp(&b.modified).then_with(|| by_name(a, b))),
+        "size" => Box::new(move |a, b| a.size.cmp(&b.size).then_with(|| by_name(a, b))),
+        "type" => Box::new(move |a, b| ext(a).cmp(&ext(b)).then_with(|| by_name(a, b))),
+        _ => return,
+    };
+    tracks.sort_by(|a, b| if desc { cmp(b, a) } else { cmp(a, b) });
+}
+
 fn stem_of(p: &std::path::Path) -> String {
     p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
@@ -1154,4 +1186,50 @@ fn next_rand(state: &mut u64) -> u64 {
     x ^= x >> 27;
     *state = x;
     x.wrapping_mul(0x2545F4914F6CDD1D)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sort_tracks;
+    use crate::model::{Track, TrackRef};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn t(name: &str, size: u64, modified: u64) -> TrackRef {
+        let path = PathBuf::from(format!(r"C:\m\{name}"));
+        Arc::new(Track {
+            id: path.to_string_lossy().into_owned(),
+            stem: name.rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or_default(),
+            file_name: name.into(),
+            path,
+            rel_dir: String::new(),
+            size,
+            modified,
+            is_video: false,
+            folder_id: "f".into(),
+        })
+    }
+
+    fn names(v: &[TrackRef]) -> Vec<&str> {
+        v.iter().map(|t| t.file_name.as_str()).collect()
+    }
+
+    #[test]
+    fn sorts_by_each_key() {
+        let base = vec![t("Track 10.mp3", 5, 300), t("b.wav", 9, 100), t("Track 2.mp3", 1, 200), t("a.mp3", 9, 400)];
+        let mut v = base.clone();
+        sort_tracks(&mut v, "default", false);
+        assert_eq!(names(&v), names(&base));
+        sort_tracks(&mut v, "name", false);
+        assert_eq!(names(&v), ["a.mp3", "b.wav", "Track 2.mp3", "Track 10.mp3"]);
+        sort_tracks(&mut v, "name", true);
+        assert_eq!(names(&v), ["Track 10.mp3", "Track 2.mp3", "b.wav", "a.mp3"]);
+        sort_tracks(&mut v, "modified", true);
+        assert_eq!(names(&v), ["a.mp3", "Track 10.mp3", "Track 2.mp3", "b.wav"]);
+        // Same size: falls back to name.
+        sort_tracks(&mut v, "size", false);
+        assert_eq!(names(&v), ["Track 2.mp3", "Track 10.mp3", "a.mp3", "b.wav"]);
+        sort_tracks(&mut v, "type", false);
+        assert_eq!(names(&v), ["a.mp3", "Track 2.mp3", "Track 10.mp3", "b.wav"]);
+    }
 }

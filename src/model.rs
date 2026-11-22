@@ -24,6 +24,8 @@ pub struct Track {
     /// Directory relative to the folder root, "/"-separated; "" for the root.
     pub rel_dir: String,
     pub size: u64,
+    /// Last modified, seconds since 1970 (0 if unknown). For sorting.
+    pub modified: u64,
     pub is_video: bool,
     pub folder_id: String,
 }

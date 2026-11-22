@@ -59,7 +59,7 @@ pub struct Model {
     pub direct: HashMap<String, Vec<TrackRef>>,
 }
 
-fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     // Case-insensitive, with digit runs compared numerically ("Track 2" < "Track 10").
     let (mut ai, mut bi) = (a.chars().peekable(), b.chars().peekable());
     loop {

@@ -59,7 +59,13 @@ pub fn scan_folder(folder_id: &str, root: &Path) -> Option<Vec<TrackRef>> {
         let Some(name) = entry.file_name().to_str() else { continue };
         let Some(is_video) = file_kind(name) else { continue };
         let path = entry.path().to_path_buf();
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let meta = entry.metadata().ok();
+        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified = meta
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         let rel_dir = path
             .parent()
             .and_then(|p| p.strip_prefix(root).ok())
@@ -81,6 +87,7 @@ pub fn scan_folder(folder_id: &str, root: &Path) -> Option<Vec<TrackRef>> {
             stem,
             rel_dir,
             size,
+            modified,
             is_video,
             folder_id: folder_id.to_string(),
         }));

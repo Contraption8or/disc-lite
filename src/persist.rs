@@ -9,6 +9,10 @@ fn default_volume() -> f32 {
     0.8
 }
 
+fn default_sort() -> String {
+    "default".into()
+}
+
 fn default_theme() -> String {
     "mono".into()
 }
@@ -29,6 +33,10 @@ pub struct Settings {
     /// Color theme id (see theme::THEMES).
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Track list order: "default" (folder order), "name", "modified", "size", "type".
+    #[serde(default = "default_sort")]
+    pub sort: String,
+    pub sort_desc: bool,
     pub expanded: Vec<String>,
     pub placement: HashMap<String, String>,
     pub order: HashMap<String, Vec<String>>,
@@ -44,6 +52,8 @@ impl Default for Settings {
             shuffle: false,
             loop_one: false,
             theme: default_theme(),
+            sort: default_sort(),
+            sort_desc: false,
             expanded: Vec::new(),
             placement: HashMap::new(),
             order: HashMap::new(),
