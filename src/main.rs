@@ -4,10 +4,13 @@
 
 mod app;
 mod audio;
+mod claude_setup;
+mod connector;
 mod dragout;
 mod folders;
 mod icons;
 mod library;
+mod mcp;
 mod migrate;
 mod model;
 mod persist;
@@ -24,6 +27,11 @@ mod widgets;
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    // Started by Claude as its connector: talk MCP over stdin/stdout, no window.
+    if std::env::args().any(|a| a == "--mcp") {
+        mcp::run();
+        return Ok(());
+    }
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Disc Lite")
         .with_inner_size([1280.0, 800.0])

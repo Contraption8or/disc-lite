@@ -141,8 +141,22 @@ impl Waveforms {
     }
 
     /// Forget a track's waveform (its file changed or was renamed).
-    pub fn invalidate(&self, id: &str) {
-        self.state.lock().unwrap().remove(id);
+
+    /// A file was renamed: same audio, so keep its peaks under the new id
+    /// instead of decoding it again.
+    pub fn rename(&self, old: &str, new: &str) {
+        let mut st = self.state.lock().unwrap();
+        if let Some(w) = st.remove(old) {
+            if !matches!(w, Wave::Pending) {
+                st.insert(new.to_string(), w);
+            }
+        }
+        drop(st);
+        let mut d = self.disk.lock().unwrap();
+        if let Some(e) = d.entries.remove(old) {
+            d.entries.insert(new.to_string(), e);
+            d.dirty = true;
+        }
     }
 
     pub fn save_cache(&self) {

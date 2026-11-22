@@ -13,10 +13,12 @@ use crate::waveform::Waveforms;
 use crate::widgets::{Confirm, ConfirmResult};
 use crate::{migrate, theme};
 
-/// One step of Remove-from-Disc history, for Ctrl+Z.
-pub enum HiddenChange {
+/// One step of undo history (Ctrl+Z): removing/restoring tracks, and renames.
+pub enum UndoStep {
     Removed(Vec<String>),
     Restored(Vec<String>),
+    /// (old path, new path) per file. `by_claude` only changes the wording.
+    Renamed { pairs: Vec<(PathBuf, PathBuf)>, by_claude: bool },
 }
 
 /// What a pending confirmation will do if accepted.
@@ -49,7 +51,7 @@ pub struct DiscApp {
     pub favorites: HashSet<String>,
     /// Tracks removed from Disc (not from disk), and the undo history for that.
     pub hidden: HashSet<String>,
-    undo_hidden: Vec<HiddenChange>,
+    undo: Vec<UndoStep>,
 
     pub folder_tracks: HashMap<String, Vec<TrackRef>>,
     pub missing: HashSet<String>,
@@ -79,6 +81,13 @@ pub struct DiscApp {
     pub theme_menu_open: bool,
     /// Where that popup was last drawn (None while closed).
     pub theme_menu_rect: Option<egui::Rect>,
+    /// The "Connect to Claude" popup, next to the theme icon.
+    pub ai_menu_open: bool,
+    pub ai_menu_rect: Option<egui::Rect>,
+    /// The Claude apps found on this computer (refreshed when it opens).
+    pub ai_targets: Vec<crate::claude_setup::Target>,
+    /// The local bridge Claude reaches Disc through (see connector.rs).
+    pub bridge: Option<crate::connector::Bridge>,
     /// Which theme the native title bar was last painted for.
     titlebar_theme: Option<&'static str>,
     /// (track id, text being typed)
@@ -127,7 +136,7 @@ impl DiscApp {
             expanded: settings.expanded.iter().cloned().collect(),
             favorites: settings.favorites.iter().cloned().collect(),
             hidden: settings.hidden.iter().cloned().collect(),
-            undo_hidden: Vec::new(),
+            undo: Vec::new(),
             settings,
             folder_tracks: HashMap::new(),
             missing: HashSet::new(),
@@ -151,6 +160,10 @@ impl DiscApp {
             sb: SidebarState::default(),
             theme_menu_open: false,
             theme_menu_rect: None,
+            ai_menu_open: false,
+            ai_menu_rect: None,
+            ai_targets: Vec::new(),
+            bridge: crate::connector::Bridge::start(ctx.clone()),
             titlebar_theme: None,
             renaming: None,
             renaming_focus_requested: false,
@@ -303,6 +316,107 @@ impl DiscApp {
             } else {
                 self.model.node_tracks(&self.active)
             };
+            self.publish_to_claude();
+        }
+    }
+
+    /// Hands the connector a fresh copy of what Claude can see.
+    fn publish_to_claude(&mut self) {
+        let Some(bridge) = &self.bridge else { return };
+        let active_name = match self.active.as_str() {
+            "all" => "All Music".to_string(),
+            "favorites" => "Favorites".to_string(),
+            "removed" => "Removed".to_string(),
+            k => self.model.nodes.get(k).map(|n| n.name.clone()).unwrap_or_default(),
+        };
+        let scanning = self
+            .settings
+            .folders
+            .iter()
+            .any(|f| !self.folder_tracks.contains_key(&f.id) && !self.missing.contains(&f.id));
+        bridge.publish(crate::connector::Snapshot {
+            folders: self.settings.folders.clone(),
+            model: std::sync::Arc::new(self.model.clone()),
+            all: self.all_tracks.clone(),
+            view: self.view.clone(),
+            active: self.active.clone(),
+            active_name,
+            search: self.search.trim().to_string(),
+            scanning,
+        });
+    }
+
+    /// Renames Claude made through the connector.
+    fn drain_connector(&mut self) {
+        let Some(bridge) = &self.bridge else { return };
+        let events: Vec<_> = bridge.events.try_iter().collect();
+        for ev in events {
+            match ev {
+                crate::connector::Event::Renamed(pairs) => {
+                    self.apply_renames(&pairs);
+                    let n = pairs.len();
+                    self.show_toast(if n == 1 {
+                        format!("Claude renamed \"{}\"  ·  Ctrl+Z to undo", stem_of(&pairs[0].1))
+                    } else {
+                        format!("Claude renamed {n} tracks  ·  Ctrl+Z to undo")
+                    });
+                    self.undo.push(UndoStep::Renamed { pairs, by_claude: true });
+                }
+            }
+        }
+    }
+
+    /// Files were renamed on disk: carry everything Disc keys by path over
+    /// to the new names right away (the rescan that follows confirms it).
+    fn apply_renames(&mut self, pairs: &[(PathBuf, PathBuf)]) {
+        use crate::model::Track;
+        let map: HashMap<String, &PathBuf> = pairs.iter().map(|(o, n)| (o.to_string_lossy().into_owned(), n)).collect();
+        let moved = |t: &TrackRef, new: &PathBuf| -> TrackRef {
+            std::sync::Arc::new(Track {
+                id: new.to_string_lossy().into_owned(),
+                path: new.clone(),
+                file_name: new.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                stem: stem_of(new),
+                rel_dir: t.rel_dir.clone(),
+                size: t.size,
+                is_video: t.is_video,
+                folder_id: t.folder_id.clone(),
+            })
+        };
+        let mut folders = HashSet::new();
+        for tracks in self.folder_tracks.values_mut() {
+            for t in tracks.iter_mut() {
+                if let Some(new) = map.get(&t.id) {
+                    folders.insert(t.folder_id.clone());
+                    *t = moved(t, new);
+                }
+            }
+        }
+        for (old, new) in &map {
+            let new_id = new.to_string_lossy().into_owned();
+            if self.favorites.remove(old) {
+                self.favorites.insert(new_id.clone());
+            }
+            if self.hidden.remove(old) {
+                self.hidden.insert(new_id.clone());
+            }
+            for q in self.queue.iter_mut().filter(|q| *q == old) {
+                *q = new_id.clone();
+            }
+            self.waves.rename(old, &new_id);
+        }
+        if let Some(cur) = &self.current {
+            if let Some(new) = map.get(&cur.id) {
+                self.current = Some(moved(cur, new));
+            }
+        }
+        if self.renaming.as_ref().is_some_and(|(id, _)| map.contains_key(id)) {
+            self.renaming = None;
+        }
+        self.mark_settings_dirty();
+        self.model_dirty = true;
+        for id in folders {
+            self.rescan(&id);
         }
     }
 
@@ -504,13 +618,11 @@ impl DiscApp {
     pub fn rename_track(&mut self, track: &TrackRef, new_stem: &str) {
         match library::rename_track(&track.path, new_stem) {
             Ok(new_path) => {
-                let new_id = new_path.to_string_lossy().into_owned();
-                if new_id != track.id && self.favorites.remove(&track.id) {
-                    self.favorites.insert(new_id);
-                    self.mark_settings_dirty();
+                if new_path.to_string_lossy() != track.id {
+                    let pairs = vec![(track.path.clone(), new_path)];
+                    self.apply_renames(&pairs);
+                    self.undo.push(UndoStep::Renamed { pairs, by_claude: false });
                 }
-                self.waves.invalidate(&track.id);
-                self.rescan(&track.folder_id);
             }
             Err(e) => self.show_toast(format!("Couldn't rename: {e}")),
         }
@@ -534,7 +646,7 @@ impl DiscApp {
         if !self.hidden.insert(track.id.clone()) {
             return;
         }
-        self.undo_hidden.push(HiddenChange::Removed(vec![track.id.clone()]));
+        self.undo.push(UndoStep::Removed(vec![track.id.clone()]));
         self.hidden_changed();
         self.show_toast(format!("Removed \"{}\" from Disc  ·  Ctrl+Z to undo", track.stem));
     }
@@ -550,22 +662,50 @@ impl DiscApp {
         } else {
             format!("Restored {} tracks  ·  Ctrl+Z to undo", ids.len())
         };
-        self.undo_hidden.push(HiddenChange::Restored(ids));
+        self.undo.push(UndoStep::Restored(ids));
         self.hidden_changed();
         self.show_toast(msg);
     }
 
-    /// Ctrl+Z: reverses the most recent remove or restore.
-    pub fn undo_remove(&mut self) {
-        let Some(change) = self.undo_hidden.pop() else { return };
+    /// Ctrl+Z: reverses the most recent remove, restore or rename.
+    pub fn undo_last(&mut self) {
+        let Some(change) = self.undo.pop() else { return };
         let msg = match change {
-            HiddenChange::Removed(ids) => {
+            UndoStep::Renamed { pairs, by_claude } => {
+                // Newest first, so chains like A→B, B→C unwind cleanly.
+                let mut back = Vec::new();
+                let mut failed = 0;
+                for (old, new) in pairs.iter().rev() {
+                    let ok = new.exists()
+                        && (!old.exists() || old.to_string_lossy().to_lowercase() == new.to_string_lossy().to_lowercase())
+                        && std::fs::rename(new, old).is_ok();
+                    if ok {
+                        back.push((new.clone(), old.clone()));
+                    } else {
+                        failed += 1;
+                    }
+                }
+                if !back.is_empty() {
+                    self.apply_renames(&back);
+                }
+                let n = back.len();
+                let what = if by_claude { "Claude's rename" } else { "the rename" };
+                let msg = match (n, failed) {
+                    (0, _) => format!("Couldn't undo {what} — the files have changed since"),
+                    (1, 0) => format!("Undid {what}: \"{}\"", stem_of(&back[0].1)),
+                    (n, 0) => format!("Undid {what} of {n} tracks"),
+                    (n, f) => format!("Undid {what} of {n} tracks ({f} couldn't be changed back)"),
+                };
+                self.show_toast(msg);
+                return;
+            }
+            UndoStep::Removed(ids) => {
                 for id in &ids {
                     self.hidden.remove(id);
                 }
                 format!("Restored \"{}\"", self.track_name(&ids[0]))
             }
-            HiddenChange::Restored(ids) => {
+            UndoStep::Restored(ids) => {
                 let n = ids.len();
                 let first = self.track_name(&ids[0]);
                 self.hidden.extend(ids);
@@ -777,10 +917,10 @@ impl DiscApp {
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
         let typing = ctx.egui_wants_keyboard_input();
-        // Ctrl+Z: undo the last "Remove from Disc" (text boxes keep their own undo).
+        // Ctrl+Z: undo the last remove / restore / rename (text boxes keep their own undo).
         let undo = ctx.input(|i| !typing && i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z));
         if undo {
-            self.undo_remove();
+            self.undo_last();
         }
         let l_key = ctx.input(|i| !typing && !i.modifiers.command && i.key_pressed(egui::Key::L));
         if l_key {
@@ -931,6 +1071,7 @@ impl eframe::App for DiscApp {
             self.titlebar_theme = Some(theme_now.id);
         }
         self.drain_scans();
+        self.drain_connector();
         self.rebuild_if_needed();
         self.tick_playback();
         self.handle_keys(&ctx);
@@ -986,11 +1127,18 @@ impl eframe::App for DiscApp {
         self.settings.hidden = { let mut h: Vec<String> = self.hidden.iter().cloned().collect(); h.sort(); h };
         persist::save(&self.settings);
         self.waves.save_cache();
+        if let Some(b) = &self.bridge {
+            b.shutdown();
+        }
         // Everything is saved; hand over to the freshly installed version.
         if let Some(exe) = self.restart_into.take() {
             let _ = std::process::Command::new(exe).spawn();
         }
     }
+}
+
+fn stem_of(p: &std::path::Path) -> String {
+    p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 fn seed() -> u64 {

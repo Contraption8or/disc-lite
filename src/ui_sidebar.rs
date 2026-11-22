@@ -243,9 +243,12 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     let primary_down = ctx.input(|i| i.pointer.primary_down());
     let pointer = ctx.input(|i| i.pointer.latest_pos());
     let dragging = app.sb.drag.is_some();
-    // The theme menu floats over the tree; clicks on it must not reach the
-    // folder rows underneath.
-    let over_menu = app.theme_menu_rect.zip(pointer).is_some_and(|(r, p)| r.contains(p));
+    // The theme and Claude menus float over the tree; clicks on them must
+    // not reach the folder rows underneath.
+    let over_menu = [app.theme_menu_rect, app.ai_menu_rect]
+        .into_iter()
+        .flatten()
+        .any(|r| pointer.is_some_and(|p| r.contains(p)));
     let mut actions: Vec<Action> = Vec::new();
     let mut row_rects: Vec<(usize, Rect)> = Vec::with_capacity(rows.len());
 
@@ -707,6 +710,7 @@ fn footer(app: &mut DiscApp, ui: &mut egui::Ui) {
             theme::TEXT3(),
         );
         theme_picker(app, ui, pos2(ver.right() + 16.0, r.center().y + 2.0));
+        claude_menu(app, ui, pos2(ver.right() + 42.0, r.center().y + 2.0));
 
         let status = app.updater.status();
         // Checked automatically at launch: nothing to show unless there's an
@@ -772,6 +776,7 @@ fn theme_picker(app: &mut DiscApp, ui: &mut egui::Ui, center: egui::Pos2) {
     let resp = resp.on_hover_text("Theme");
     if resp.clicked() {
         app.theme_menu_open = !app.theme_menu_open;
+        app.ai_menu_open = false;
     }
     if !app.theme_menu_open {
         app.theme_menu_rect = None;
@@ -847,5 +852,130 @@ fn theme_picker(app: &mut DiscApp, ui: &mut egui::Ui, center: egui::Pos2) {
         && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|pos| !area.response.rect.contains(pos) && !r.contains(pos));
     if clicked_outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.theme_menu_open = false;
+    }
+}
+
+/// The sparkle icon, and the "Connect to Claude" popup it opens: adds Disc
+/// Lite as a connector in the Claude apps found on this computer.
+fn claude_menu(app: &mut DiscApp, ui: &mut egui::Ui, center: egui::Pos2) {
+    use crate::claude_setup::{self, State};
+    let r = Rect::from_center_size(center, vec2(24.0, 24.0));
+    let resp = ui.interact(r, Id::new("claude-icon"), Sense::click());
+    crate::widgets::hand(&resp, true);
+    let open = app.ai_menu_open;
+    let lit = open || resp.hovered();
+    let p = ui.painter();
+    if lit {
+        p.rect_filled(r, 6.0, theme::BG_HOVER());
+    }
+    icons::sparkle(p, r.center(), 15.0, if lit { theme::TEXT() } else { theme::TEXT3() });
+    let resp = resp.on_hover_text("Connect to Claude");
+    if resp.clicked() {
+        app.ai_menu_open = !app.ai_menu_open;
+        app.theme_menu_open = false;
+        if app.ai_menu_open {
+            app.ai_targets = claude_setup::targets();
+        }
+    }
+    if !app.ai_menu_open {
+        app.ai_menu_rect = None;
+        return;
+    }
+
+    const W: f32 = 256.0;
+    let ctx = ui.ctx().clone();
+    let targets = app.ai_targets.clone();
+    let all_connected = !targets.is_empty() && targets.iter().all(|t| t.state == State::Connected);
+    let mut clicked: Option<bool> = None; // Some(true) = connect, Some(false) = disconnect
+    let area = egui::Area::new(Id::new("claude-menu"))
+        .order(egui::Order::Foreground)
+        .pivot(Align2::LEFT_BOTTOM)
+        .fixed_pos(pos2(r.left() - 30.0, r.top() - 6.0))
+        .show(&ctx, |ui| {
+            egui::Frame::new()
+                .fill(theme::BG_PANEL_ALT())
+                .stroke(Stroke::new(1.0, theme::BORDER()))
+                .corner_radius(egui::CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(14))
+                .shadow(egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: egui::Color32::from_black_alpha(140) })
+                .show(ui, |ui| {
+                    ui.set_width(W);
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    ui.label(egui::RichText::new("Connect to Claude").font(theme::font_semibold(14.0)).color(theme::TEXT()));
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "Lets Claude look through your folders and rename tracks for you. Try asking: \u{201c}rename every song in this folder to Title - Artist\u{201d}.",
+                        )
+                        .font(theme::font(12.0))
+                        .color(theme::TEXT2()),
+                    );
+                    ui.add_space(12.0);
+
+                    if targets.is_empty() {
+                        ui.label(
+                            egui::RichText::new("Claude isn't installed on this computer yet. Get it from claude.ai/download, then come back here.")
+                                .font(theme::font(12.0))
+                                .color(theme::TEXT3()),
+                        );
+                        return;
+                    }
+                    for t in &targets {
+                        let (row, _) = ui.allocate_exact_size(vec2(W, 26.0), Sense::hover());
+                        let p = ui.painter();
+                        let (dot, status) = match t.state {
+                            State::Connected => (theme::ACCENT(), "Connected"),
+                            State::Outdated => (theme::TEXT3(), "Needs reconnecting"),
+                            State::NotConnected => (theme::TEXT3(), "Not connected"),
+                        };
+                        if t.state == State::Connected {
+                            p.circle_filled(pos2(row.left() + 4.0, row.center().y), 3.5, dot);
+                        } else {
+                            p.circle_stroke(pos2(row.left() + 4.0, row.center().y), 3.0, Stroke::new(1.2, dot));
+                        }
+                        p.text(pos2(row.left() + 16.0, row.center().y), Align2::LEFT_CENTER, t.app.label(), theme::font(13.0), theme::TEXT());
+                        p.text(row.right_center(), Align2::RIGHT_CENTER, status, theme::font(12.0), theme::TEXT3());
+                    }
+                    ui.add_space(12.0);
+                    let kind = if all_connected { widgets::ButtonKind::Ghost } else { widgets::ButtonKind::Primary };
+                    let label = if all_connected { "Disconnect" } else { "Connect" };
+                    if widgets::button(ui, label, kind, true, None).clicked() {
+                        clicked = Some(!all_connected);
+                    }
+                    ui.add_space(10.0);
+                    ui.label(
+                        egui::RichText::new("Restart Claude after connecting. Claude's renames can be undone here with Ctrl+Z.")
+                            .font(theme::font(11.5))
+                            .color(theme::TEXT3()),
+                    );
+                });
+        });
+    app.ai_menu_rect = Some(area.response.rect);
+
+    if let Some(connect) = clicked {
+        let mut errors = Vec::new();
+        let mut names = Vec::new();
+        for t in &targets {
+            match claude_setup::set(t.app, &t.path, connect) {
+                Ok(()) => names.push(t.app.label()),
+                Err(e) => errors.push(format!("{}: {e}", t.app.label())),
+            }
+        }
+        app.ai_targets = claude_setup::targets();
+        let msg = if !errors.is_empty() {
+            format!("Couldn't update {}", errors.join("; "))
+        } else if connect {
+            format!("Connected to {} — restart Claude to start using it", names.join(" and "))
+        } else {
+            format!("Disconnected from {}", names.join(" and "))
+        };
+        app.show_toast(msg);
+    }
+
+    // Close on Escape, or a click anywhere outside the popup and the icon.
+    let clicked_outside = ctx.input(|i| i.pointer.any_click())
+        && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|pos| !area.response.rect.contains(pos) && !r.contains(pos));
+    if clicked_outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.ai_menu_open = false;
     }
 }

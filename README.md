@@ -36,13 +36,25 @@ quarter of a second, and a fraction of the Electron version's memory.
   track.
 - **Search** across all music. Drop audio files onto the window (or use
   *Import*) to copy them into the folder you're viewing.
-- Keys: `Space` play/pause · `←`/`→` seek 5s · `↑`/`↓` volume · `S` shuffle · `L` loop · `Ctrl+Z` undo remove ·
+- Keys: `Space` play/pause · `←`/`→` seek 5s · `↑`/`↓` volume · `S` shuffle · `L` loop · `Ctrl+Z` undo (remove, restore, rename) ·
   `Ctrl+F` or `/` search · in the folder column: `Delete` remove selected,
   `Ctrl+A` select all, `Esc` clear selection.
 
 **Themes**: the small palette icon next to the version number (bottom of
 the folder column) switches between *Mono* (black and white) and *Plum*
 (dusky wine with a peach accent). The choice is remembered.
+
+**Claude**: the sparkle icon next to the palette connects Disc Lite to
+Claude (the Claude app and/or Claude Code, whichever are installed). Once
+connected and Claude has been restarted, you can ask Claude things like
+*"rename every song in this folder to Title - Artist"*. Claude sees your
+folders and each song's title/artist/album tags, and renames the files.
+"This folder" means whatever Disc is showing. Favorites and waveforms
+follow the renamed files, and `Ctrl+Z` in Disc undoes Claude's whole batch.
+Claude can only rename tracks that are in Disc, and it can't delete
+anything. If Disc isn't open when Claude asks, it opens itself. Under the
+hood, Claude starts `disc-lite.exe --mcp` (an MCP server), which talks to the
+running app over a local-only connection.
 
 **Updates**: Disc Lite quietly checks GitHub for a newer release when it
 launches. If there is one, an *Update to X* button appears at the bottom of
@@ -81,5 +93,7 @@ run against a throwaway profile instead.
 - `src/audio.rs` — playback (rodio); `src/dragout.rs` — native drag-out
 - `src/migrate.rs` — one-time import from the Electron version
 - `src/update.rs` — update check at launch and the in-place exe swap
+- `src/connector.rs` — the app's local bridge for Claude; `src/mcp.rs` —
+  the `--mcp` server Claude runs; `src/claude_setup.rs` — the Connect button
 - `src/theme.rs`, `src/icons.rs`, `src/widgets.rs` — themes, painted
   icons, shared widgets

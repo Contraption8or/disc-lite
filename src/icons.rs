@@ -240,6 +240,25 @@ pub fn palette(p: &Painter, c: Pos2, s: f32, col: Color32, hole: Color32) {
     }
 }
 
+/// A four-point sparkle with a small one beside it: "AI".
+pub fn sparkle(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    let big = pos2(c.x - s * 0.08, c.y + s * 0.06);
+    for (center, r) in [(big, s * 0.38), (pos2(c.x + s * 0.3, c.y - s * 0.3), s * 0.15)] {
+        // Points at the four tips, pinched in between; the shape is
+        // concave, so fill it as a fan of triangles from the center.
+        let pts: Vec<Pos2> = (0..8)
+            .map(|i| {
+                let a = -PI * 0.5 + PI * 0.25 * i as f32;
+                let d = if i % 2 == 0 { r } else { r * 0.3 };
+                pos2(center.x + d * a.cos(), center.y + d * a.sin())
+            })
+            .collect();
+        for i in 0..pts.len() {
+            p.add(Shape::convex_polygon(vec![center, pts[i], pts[(i + 1) % pts.len()]], col, Stroke::NONE));
+        }
+    }
+}
+
 /// An eye with a slash through it: "hidden".
 pub fn eye_off(p: &Painter, c: Pos2, s: f32, col: Color32) {
     let (w, h) = (s * 0.46, s * 0.26);

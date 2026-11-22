@@ -49,7 +49,7 @@ pub struct Node {
     pub idx: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Model {
     pub nodes: HashMap<String, Node>,
     /// parent key ("" = top level) -> child keys, in display order.

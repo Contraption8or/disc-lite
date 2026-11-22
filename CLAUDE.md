@@ -10,7 +10,7 @@ settings, or other features; that's what regular Disc is for.
 - `cargo build --release` — the shipped exe (`target/release/disc-lite.exe`;
   fat LTO, takes a few minutes)
 - `DISC_LITE_DATA=<dir>` runs against a throwaway settings folder
-There is no test suite.
+`cargo test` runs the unit tests (folders, connector, Claude setup, updater, waveform).
 
 ## Things that aren't obvious
 - All state lives in `DiscApp` (`src/app.rs`); the `ui_*` modules collect
@@ -51,3 +51,20 @@ There is no test suite.
   that answers WM_NCCALCSIZE with "client = whole window" (except when
   maximized) and gets the shadow via a 1px *bottom* DWM frame extension
   instead (a top one would make DWM draw a caption).
+- The Claude connector has three parts. `connector.rs` is in the app: a
+  127.0.0.1 listener (random port + token, advertised in `connector.json` in
+  the data folder) answering from a `Snapshot` the app publishes on every
+  view rebuild, so Claude still gets answers while Disc is minimized (eframe
+  may not run frames then). Renames happen on the bridge thread, which then
+  sends `Event::Renamed` so the app carries favorites, removed tracks, the
+  queue and waveforms over to the new paths, and records an undo step.
+  `mcp.rs` is `disc-lite --mcp`, the stdio MCP server Claude launches. It
+  proxies to the bridge, starts Disc if it isn't open, and reads tags
+  (lofty) in its own process. `claude_setup.rs` writes only our
+  `mcpServers.disc-lite` entry into the Claude app's config (the
+  Microsoft Store build reads it from `Packages\Claude_*\LocalCache\Roaming\Claude`)
+  and Claude Code's `~/.claude.json`, keeping key order (serde_json
+  `preserve_order`) and making a one-time `.before-disc-lite` backup.
+  Claude can only rename tracks that are already in Disc.
+- Ctrl+Z is one stack (`UndoStep`) covering remove, restore and rename
+  (rename undo includes Claude's whole batch).

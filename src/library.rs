@@ -276,6 +276,11 @@ pub fn rename_track(path: &Path, new_stem: &str) -> Result<PathBuf, String> {
     let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
     let target = path.with_file_name(format!("{new_stem}{ext}"));
     if same_path(&target, path) {
+        // Only the capitalization changed (or nothing did): Windows can do
+        // that in place, and `exists()` would wrongly see a collision.
+        if target.to_string_lossy() != path.to_string_lossy() {
+            std::fs::rename(path, &target).map_err(|e| e.to_string())?;
+        }
         return Ok(target);
     }
     if target.exists() {
