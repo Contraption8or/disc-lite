@@ -57,10 +57,36 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
     a > b
 }
 
-fn old_path(exe: &std::path::Path) -> PathBuf {
+fn old_path(exe: &std::path::Path, n: u32) -> PathBuf {
     let mut s = exe.as_os_str().to_owned();
-    s.push(".old");
+    s.push(if n == 0 { ".old".to_string() } else { format!(".old{}", n + 1) });
     PathBuf::from(s)
+}
+
+/// Somewhere to move the running exe out of the way. Usually `.old`, but
+/// a previous version can still be running from there — Claude keeps
+/// `disc-lite --mcp` alive across updates — and a running exe can't be
+/// deleted or replaced, so then `.old2`, `.old3`, ... instead.
+fn free_old_path(exe: &std::path::Path) -> Option<PathBuf> {
+    (0..50).map(|n| old_path(exe, n)).find(|p| {
+        let _ = std::fs::remove_file(p);
+        !p.exists()
+    })
+}
+
+/// Deletes leftovers from earlier updates (`.old`, `.old2`, ... and a stray
+/// `.new`); any still running stay until a later launch.
+fn clean_leftovers(exe: &std::path::Path) {
+    let _ = std::fs::remove_file(new_path(exe));
+    let (Some(dir), Some(name)) = (exe.parent(), exe.file_name()) else { return };
+    let prefix = format!("{}.old", name.to_string_lossy()).to_lowercase();
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let f = e.file_name().to_string_lossy().to_lowercase();
+        if f.strip_prefix(&prefix).is_some_and(|rest| rest.chars().all(|c| c.is_ascii_digit())) {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 fn new_path(exe: &std::path::Path) -> PathBuf {
@@ -73,8 +99,7 @@ impl Updater {
     pub fn new() -> Self {
         // Leftover from the update that launched this version.
         if let Ok(exe) = std::env::current_exe() {
-            let _ = std::fs::remove_file(old_path(&exe));
-            let _ = std::fs::remove_file(new_path(&exe));
+            clean_leftovers(&exe);
         }
         Self { status: Arc::new(Mutex::new(Status::Idle)) }
     }
@@ -168,11 +193,10 @@ fn download_and_swap(url: &str) -> Result<PathBuf, String> {
         return Err("The download wasn't a valid app file".into());
     }
     let new = new_path(&exe);
-    let old = old_path(&exe);
+    let old = free_old_path(&exe).ok_or("Couldn't replace the app (too many old copies still running)")?;
     let mut f = std::fs::File::create(&new).map_err(|e| format!("Couldn't save the update ({e})"))?;
     f.write_all(&bytes).map_err(|e| format!("Couldn't save the update ({e})"))?;
     drop(f);
-    let _ = std::fs::remove_file(&old);
     if let Err(e) = std::fs::rename(&exe, &old) {
         let _ = std::fs::remove_file(&new);
         return Err(format!("Couldn't replace the app ({e})"));
@@ -199,7 +223,40 @@ pub fn open_url(url: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::is_newer;
+    use super::{clean_leftovers, free_old_path, is_newer, old_path};
+
+    /// `.old` still in use (like a running exe): the swap picks `.old2`, and
+    /// cleanup removes only what isn't locked.
+    #[cfg(windows)]
+    #[test]
+    fn locked_old_copy_does_not_block_an_update() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("disc-lite-update-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("disc-lite.exe");
+        std::fs::write(&exe, b"exe").unwrap();
+        std::fs::write(old_path(&exe, 0), b"older").unwrap();
+        std::fs::write(dir.join("disc-lite.exe.older-notes"), b"not ours").unwrap();
+        // No sharing at all: can't be deleted while this handle is open.
+        let lock = std::fs::OpenOptions::new().read(true).share_mode(0).open(old_path(&exe, 0)).unwrap();
+
+        let free = free_old_path(&exe).unwrap();
+        assert_eq!(free, old_path(&exe, 1));
+        assert!(free.to_string_lossy().ends_with(".old2"));
+        std::fs::rename(&exe, &free).unwrap();
+        std::fs::write(&exe, b"new exe").unwrap();
+
+        clean_leftovers(&exe);
+        assert!(old_path(&exe, 0).exists(), "locked copy stays");
+        assert!(!free.exists(), "unlocked copy is removed");
+        drop(lock);
+        clean_leftovers(&exe);
+        assert!(!old_path(&exe, 0).exists());
+        assert!(dir.join("disc-lite.exe.older-notes").exists(), "unrelated files are left alone");
+        assert!(exe.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn compares_versions() {
