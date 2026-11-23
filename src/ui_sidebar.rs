@@ -343,7 +343,9 @@ fn sidebar_body(app: &mut DiscApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                 } else {
                     theme::TEXT2()
                 };
-                let font = if row.kind == NodeKind::Folder { theme::font_semibold(13.0) } else { theme::font(13.0) };
+                // Only top-level rows are bold — not added folders nested
+                // inside others.
+                let font = if row.depth == 0 { theme::font_semibold(13.0) } else { theme::font(13.0) };
                 let g = widgets::elided(p, &row.name, font, col, rect.right() - right_pad - name_x);
                 p.galley(pos2(name_x, rect.center().y - g.size().y / 2.0), g, col);
             }
