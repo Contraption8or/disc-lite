@@ -35,7 +35,9 @@ settings, or other features; that's what regular Disc is for.
   its first `.exe` asset, so every release must attach the exe. Version
   comes from `Cargo.toml` — bump it before building a release. The swap
   renames the running exe to `.old` (Windows allows renaming, not
-  overwriting) and the next launch deletes it.
+  overwriting), or `.old2`, `.old3`... when an older copy is still
+  running from `.old` (Claude keeps `disc-lite --mcp` alive across
+  updates). Each launch deletes whichever leftovers are no longer running.
 - Colors are functions (`theme::TEXT()`), not constants, so a theme switch
   applies next frame. A new theme is one more `Palette` in `theme::THEMES`;
   a new color is a field on `Palette` plus its accessor fn.
