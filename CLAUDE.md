@@ -68,3 +68,8 @@ settings, or other features; that's what regular Disc is for.
   Claude can only rename tracks that are already in Disc.
 - Ctrl+Z is one stack (`UndoStep`) covering remove, restore and rename
   (rename undo includes Claude's whole batch).
+- A directory can be both an added folder and a scanned subfolder of
+  another added folder (Add Folder Inside… on a real subdirectory). The
+  deepest added folder owns those tracks; `tree::build_model` drops them
+  from the outer folder (`nested_added_dirs`) so the tree doesn't show the
+  directory twice.

@@ -96,6 +96,22 @@ pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
+/// Other added folders that sit inside `f` on disk, as lowercase
+/// "/"-separated paths relative to `f` (the same form as `Track::rel_dir`).
+fn nested_added_dirs(f: &Folder, folders: &[Folder]) -> Vec<String> {
+    let norm = |p: &str| p.replace('/', "\\").trim_end_matches('\\').to_lowercase();
+    let root = norm(&f.folder_path);
+    folders
+        .iter()
+        .filter(|g| g.id != f.id)
+        .filter_map(|g| {
+            let p = norm(&g.folder_path);
+            let rest = p.strip_prefix(&root)?.strip_prefix('\\')?;
+            (!rest.is_empty()).then(|| rest.replace('\\', "/"))
+        })
+        .collect()
+}
+
 pub fn build_model(
     folders: &[Folder],
     folder_tracks: &HashMap<String, Vec<TrackRef>>,
@@ -117,9 +133,18 @@ pub fn build_model(
                 idx: i,
             },
         );
+        // Directories inside this one that were also added to Disc on their
+        // own (e.g. through "Add Folder Inside…"): those tracks belong to
+        // that folder, so they don't show up here a second time as a
+        // subfolder.
+        let owned_elsewhere = nested_added_dirs(f, folders);
         let mut by_rel: HashMap<&str, Vec<TrackRef>> = HashMap::new();
         if let Some(tracks) = folder_tracks.get(&f.id) {
             for t in tracks {
+                let rel = t.rel_dir.to_lowercase();
+                if owned_elsewhere.iter().any(|o| rel == *o || rel.starts_with(&format!("{o}/"))) {
+                    continue;
+                }
                 by_rel.entry(t.rel_dir.as_str()).or_default().push(t.clone());
             }
         }
@@ -304,4 +329,67 @@ pub fn move_nodes(
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Track;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn track(folder_id: &str, root: &str, rel: &str, name: &str) -> TrackRef {
+        let dir = if rel.is_empty() { root.to_string() } else { format!(r"{root}\{}", rel.replace('/', "\\")) };
+        let path = PathBuf::from(format!(r"{dir}\{name}"));
+        Arc::new(Track {
+            id: path.to_string_lossy().into_owned(),
+            path,
+            file_name: name.into(),
+            stem: name.into(),
+            rel_dir: rel.into(),
+            size: 0,
+            modified: 0,
+            is_video: false,
+            folder_id: folder_id.into(),
+        })
+    }
+
+    #[test]
+    fn a_folder_added_inside_another_is_not_also_a_subfolder() {
+        let folders = vec![
+            Folder { id: "mb".into(), name: "MusicBed".into(), folder_path: r"E:\Music\MusicBed".into() },
+            // Different case and a trailing slash: still the same directory.
+            Folder { id: "je".into(), name: "Judah Earl".into(), folder_path: r"e:\music\musicbed\judah earl\".into() },
+        ];
+        let mut tracks = HashMap::new();
+        tracks.insert(
+            "mb".to_string(),
+            vec![
+                track("mb", r"E:\Music\MusicBed", "", "top.mp3"),
+                track("mb", r"E:\Music\MusicBed", "Jazz", "jazz.mp3"),
+                track("mb", r"E:\Music\MusicBed", "Judah Earl", "a.mp3"),
+                track("mb", r"E:\Music\MusicBed", "Judah Earl/Live", "b.mp3"),
+            ],
+        );
+        tracks.insert(
+            "je".to_string(),
+            vec![
+                track("je", r"E:\Music\MusicBed\Judah Earl", "", "a.mp3"),
+                track("je", r"E:\Music\MusicBed\Judah Earl", "Live", "b.mp3"),
+            ],
+        );
+        let mut placement = HashMap::new();
+        placement.insert("je".to_string(), "mb".to_string());
+        let m = build_model(&folders, &tracks, &placement, &HashMap::new());
+
+        let names: Vec<&str> = m.children("mb").iter().map(|k| m.nodes[k].name.as_str()).collect();
+        assert_eq!(names.iter().filter(|n| **n == "Judah Earl").count(), 1, "{names:?}");
+        assert!(!m.nodes.contains_key("mb::Judah Earl"));
+        assert!(!m.nodes.contains_key("mb::Judah Earl/Live"));
+        assert!(m.nodes.contains_key("je::Live"));
+        assert!(m.nodes.contains_key("mb::Jazz"));
+        // Every track shows exactly once under MusicBed.
+        assert_eq!(m.node_tracks("mb").len(), 4);
+        assert_eq!(m.node_tracks("je").len(), 2);
+    }
 }
